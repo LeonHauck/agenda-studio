@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f6f4">
+  <meta name="robots" content="noindex">
+  <title>Agenda · Administração</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../icons/icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Agenda">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body>
+  <div id="auth-screen" class="auth-wrap"></div>
+
+  <div class="app" id="app" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" id="brand-mark"></span>
+        <div>
+          <strong id="brand-name">Meu Studio</strong>
+          <small>Agenda de atendimentos</small>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" data-action="new-appt" id="side-new"></button>
+      <nav id="sidenav" class="sidenav" aria-label="Navegação principal"></nav>
+      <button class="btn btn-ghost btn-block sidebar-foot" data-action="logout" id="side-logout"></button>
+    </aside>
+
+    <main id="view" class="main"></main>
+
+    <nav id="tabbar" class="tabbar" aria-label="Navegação principal"></nav>
+    <button class="fab" data-action="new-appt" aria-label="Novo agendamento" id="fab"></button>
+  </div>
+
+  <div id="sheet-root"></div>
+  <div id="dialog-root"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="../js/config.js"></script>
+  <script src="../js/core.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/admin.js"></script>
+</body>
+</html>

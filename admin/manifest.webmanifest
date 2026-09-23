@@ -1,0 +1,15 @@
+{
+  "name": "Agenda Studio",
+  "short_name": "Agenda",
+  "description": "Painel de agendamentos do estúdio.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f4",
+  "theme_color": "#f7f6f4",
+  "icons": [
+    { "src": "../icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "../icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
