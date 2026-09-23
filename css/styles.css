@@ -547,7 +547,9 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 /* ---------- Login do painel ---------- */
 .auth-wrap { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
 .auth-wrap[hidden] { display: none; }
-.auth-card { width: min(400px, 100%); padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+.auth-col { width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; }
+.auth-col .credit { margin-top: 20px; }
+.auth-card { width: 100%; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
 .auth-card h1 { font-size: 22px; }
 .auth-card > p { margin: -6px 0 6px; }
 .auth-link { font-size: 13px; color: var(--muted); text-align: center; text-decoration: underline; text-underline-offset: 3px; }
@@ -673,6 +675,14 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .done-actions { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 
 .pub .toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
+
+/* ---------- Rodapé (crédito) ---------- */
+.credit { margin: 32px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
+.credit a {
+  color: var(--text); font-weight: 600;
+  text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px;
+}
+.credit a:hover { color: var(--accent); text-decoration-color: currentColor; }
 
 /* ---------- Toast ---------- */
 .toast {

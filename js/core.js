@@ -121,6 +121,10 @@ const ICONS = {
 const icon = name => `<span class="i" aria-hidden="true"><svg viewBox="0 0 24 24">${ICONS[name] || ''}</svg></span>`;
 
 /* ---------- Interface ---------- */
+const CREDIT_URL = 'https://www.linkedin.com/in/leon-hauck/';
+const creditHtml = () =>
+  `<footer class="credit">Desenvolvido por <a href="${CREDIT_URL}" target="_blank" rel="noopener">Leon Hauck</a></footer>`;
+
 function applyAccent(color) {
   if (color) document.documentElement.style.setProperty('--accent', color);
 }

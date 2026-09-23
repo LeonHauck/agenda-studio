@@ -37,6 +37,7 @@ function render() {
     </header>
     ${st.step < 4 ? stepper() : ''}
     <main class="pub-main">${[null, stepServices, stepTime, stepDetails, stepDone][st.step]()}</main>
+    ${creditHtml()}
     ${bottomBar()}`;
 
   if (st.step === 2) $('.day-pill.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });

@@ -39,7 +39,7 @@ function showAuth(html) {
   $('#app').hidden = true;
   const screen = $('#auth-screen');
   screen.hidden = false;
-  screen.innerHTML = `<div class="auth-card card">${html}</div>`;
+  screen.innerHTML = `<div class="auth-col"><div class="auth-card card">${html}</div>${creditHtml()}</div>`;
 }
 
 function showSetupNeeded() {
@@ -160,7 +160,7 @@ function renderNav() {
 function render() {
   if (!db) return;
   const route = currentRoute();
-  $('#view').innerHTML = ROUTES[route].render();
+  $('#view').innerHTML = ROUTES[route].render() + creditHtml();
   $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === route));
   $('#brand-name').textContent = db.settings.businessName;
   document.title = `${ROUTES[route].label} · ${db.settings.businessName}`;
