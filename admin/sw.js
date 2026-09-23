@@ -1,8 +1,8 @@
 // Service worker do painel: permite instalar como app no celular.
 // "Rede primeiro": sempre busca a versão mais nova; usa o cache só sem internet.
 // Requisições ao Supabase (outro domínio) não passam por aqui.
-const CACHE = 'agenda-admin-v2';
-const ASSETS = ['./', './index.html', '../css/styles.css', '../js/config.js', '../js/core.js', '../js/api.js', '../js/admin.js', '../icons/icon.svg'];
+const CACHE = 'agenda-admin-v3';
+const ASSETS = ['./', './index.html', '../css/styles.css', '../js/config.js', '../js/core.js', '../js/api.js', '../js/admin.js', '../icons/icon.svg', '../icons/icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
