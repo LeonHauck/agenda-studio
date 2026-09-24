@@ -10,3 +10,7 @@ Desktop.ini
 # Testes locais
 _*.html
 _*.js
+
+# Arquivos com dados da cliente (não publicar)
+privado/
+*.pdf
