@@ -81,6 +81,14 @@ const API = (() => {
     payment_method: a.payment || null,
     notes: a.notes || '',
   });
+  const blockFrom = r => ({
+    id: r.id, startDate: r.start_date, endDate: r.end_date,
+    startTime: r.start_time || '', endTime: r.end_time || '', reason: r.reason || '',
+  });
+  const blockTo = b => withId(b, {
+    start_date: b.startDate, end_date: b.endDate,
+    start_time: b.startTime || null, end_time: b.endTime || null, reason: b.reason || '',
+  });
   function withId(src, row) {
     if (src.id) row.id = src.id;
     return row;
@@ -134,13 +142,17 @@ const API = (() => {
     /* ---------- Painel da dona ---------- */
     async loadAll() {
       const since = dateKey(addDays(new Date(), -400));
-      const [settings, services, clients, appointments] = await Promise.all([
+      const [settings, services, clients, appointments, blocks] = await Promise.all([
         sb.from('settings').select('*').eq('id', 1).single().then(({ data, error }) => { check(error); return settingsFrom(data); }),
         fetchAll('services', q => q.order('sort').order('name').order('id')).then(rows => rows.map(serviceFrom)),
         fetchAll('clients', q => q.order('name').order('id')).then(rows => rows.map(clientFrom)),
         fetchAll('appointments', q => q.gte('date', since).order('date').order('start_time').order('id')).then(rows => rows.map(apptFrom)),
+        // Tolerante: se a tabela de bloqueios ainda não existir, o painel continua funcionando
+        fetchAll('blocks', q => q.gte('end_date', since).order('start_date').order('id'))
+          .then(rows => rows.map(blockFrom))
+          .catch(err => { console.warn('Bloqueios indisponíveis:', err.message); return []; }),
       ]);
-      return { settings, services, clients, appointments };
+      return { settings, services, clients, appointments, blocks };
     },
     async saveSettings(s) {
       const { error } = await sb.from('settings').update(settingsTo(s)).eq('id', 1);
@@ -156,11 +168,13 @@ const API = (() => {
     },
     saveAppointment: async a => apptFrom(await saveRow('appointments', apptTo(a))),
     deleteAppointment: id => deleteRow('appointments', id),
+    saveBlock: async b => blockFrom(await saveRow('blocks', blockTo(b))),
+    deleteBlock: id => deleteRow('blocks', id),
 
     /** Avisa quando algo muda no banco (ex.: cliente agendou pelo link). */
     subscribe(onChange) {
       const channel = sb.channel('agenda-admin');
-      ['appointments', 'clients', 'services'].forEach(table => {
+      ['appointments', 'clients', 'services', 'blocks'].forEach(table => {
         channel.on('postgres_changes', { event: '*', schema: 'public', table }, payload => onChange(table, payload));
       });
       channel.subscribe();

@@ -8,7 +8,31 @@ const ui = { date: todayKey(), clientQuery: '', finPeriod: 'semana', finAnchor: 
 
 const isActive = a => a.status !== 'cancelado';
 const isWorkDay = k => db.settings.workDays.includes(parseKey(k).getDay());
-const availableSlots = (date, duration, excludeId) => computeSlots(db.settings, db.appointments, date, duration, excludeId);
+
+/* ---------- Bloqueios ---------- */
+const blocksOn = k => db.blocks.filter(b => k >= b.startDate && k <= b.endDate);
+const fullDayBlock = k => blocksOn(k).find(b => !b.startTime);
+const blockMinutes = b => (b.startTime ? [toMin(b.startTime), toMin(b.endTime)] : [0, 1440]);
+// Bloqueios no mesmo formato de agendamento, para o cálculo de horários livres
+const blockBusy = k => blocksOn(k).map(b => {
+  const [s, e] = blockMinutes(b);
+  return { date: k, start: fromMin(s), duration: e - s };
+});
+function findBlock(date, start, duration) {
+  return blocksOn(date).find(b => {
+    const [s, e] = blockMinutes(b);
+    return start < e && start + duration > s;
+  });
+}
+function blockLabel(b) {
+  const dates = b.startDate === b.endDate
+    ? fmtDateShort(b.startDate).slice(0, 5)
+    : `${fmtDateShort(b.startDate).slice(0, 5)} a ${fmtDateShort(b.endDate).slice(0, 5)}`;
+  return `${dates} · ${b.startTime ? `${b.startTime} – ${b.endTime}` : 'dia inteiro'}`;
+}
+
+const availableSlots = (date, duration, excludeId) =>
+  computeSlots(db.settings, [...db.appointments, ...blockBusy(date)], date, duration, excludeId);
 const findClientByName = name => db.clients.find(x => x.name.trim().toLowerCase() === name.trim().toLowerCase());
 const publicUrl = () => new URL('../', location.href).href;
 const MAX_INTERVAL = 240; // mesmo limite do banco (settings.slot_interval)
@@ -177,7 +201,8 @@ function renderAgenda() {
   const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)).map(d => {
     const k = dateKey(d);
     const count = dayAppointments(k).filter(isActive).length;
-    const cls = ['day', k === ui.date && 'is-selected', k === tk && 'is-today', !isWorkDay(k) && 'is-off'].filter(Boolean).join(' ');
+    const off = !isWorkDay(k) || fullDayBlock(k);
+    const cls = ['day', k === ui.date && 'is-selected', k === tk && 'is-today', off && 'is-off', fullDayBlock(k) && 'is-blocked'].filter(Boolean).join(' ');
     return `<button class="${cls}" data-action="pick-day" data-date="${k}" aria-label="${esc(fmtDateLong(k))}">
       <span class="day-dow">${DOW_SHORT[d.getDay()]}</span>
       <span class="day-num">${d.getDate()}</span>
@@ -196,6 +221,7 @@ function renderAgenda() {
       </div>
       <div class="head-actions">
         ${ui.date !== tk ? `<button class="btn btn-ghost btn-sm" data-action="go-today">Hoje</button>` : ''}
+        <button class="btn btn-ghost btn-sm" data-action="new-block" data-date="${ui.date}">${icon('lock')} Bloquear</button>
       </div>
     </header>
 
@@ -226,10 +252,14 @@ function renderAgenda() {
 
 function timelineHtml(k, appts) {
   const s = db.settings;
-  const work = isWorkDay(k);
+  const fullBlock = fullDayBlock(k);
+  const partial = blocksOn(k).filter(b => b.startTime);
+  const work = isWorkDay(k) && !fullBlock;
   const tk = todayKey();
+  const banner = fullBlock ? blockBanner(fullBlock) : '';
 
-  if (!appts.length) {
+  if (!appts.length && !partial.length) {
+    if (fullBlock) return banner;
     return `<div class="empty">
       ${icon(work ? 'calendar' : 'moon')}
       <h3>${work ? 'Nenhum agendamento' : 'Dia de folga'}</h3>
@@ -238,8 +268,11 @@ function timelineHtml(k, appts) {
     </div>`;
   }
 
-  // Cartões e intervalos livres, ordenados pelo horário de início
-  const items = appts.map(a => ({ at: toMin(a.start), order: 1, html: apptCard(a) }));
+  // Cartões, bloqueios e intervalos livres, ordenados pelo horário de início
+  const items = [
+    ...appts.map(a => ({ at: toMin(a.start), order: 1, html: apptCard(a) })),
+    ...partial.map(b => ({ at: toMin(b.startTime), order: 1, html: blockCard(b) })),
+  ];
   const step = s.slotInterval;
   const pushGap = (from, to) => {
     if (!work || k < tk) return;
@@ -251,15 +284,41 @@ function timelineHtml(k, appts) {
     </button>` });
   };
 
+  // Períodos ocupados: agendamentos ativos + bloqueios parciais
+  const busy = [
+    ...appts.filter(isActive).map(a => [toMin(a.start), toMin(a.start) + a.duration]),
+    ...partial.map(blockMinutes),
+  ].sort((x, y) => x[0] - y[0]);
+
   let cursor = toMin(s.openTime);
-  for (const a of appts.filter(isActive)) {
-    pushGap(cursor, toMin(a.start));
-    cursor = Math.max(cursor, toMin(a.start) + a.duration);
+  for (const [start, end] of busy) {
+    pushGap(cursor, start);
+    cursor = Math.max(cursor, end);
   }
   pushGap(cursor, toMin(s.closeTime));
 
   items.sort((x, y) => x.at - y.at || x.order - y.order);
-  return `<div class="timeline">${items.map(i => i.html).join('')}</div>`;
+  return `${banner}<div class="timeline">${items.map(i => i.html).join('')}</div>`;
+}
+
+function blockBanner(b) {
+  const range = b.startDate === b.endDate ? '' : ` · de ${fmtDateShort(b.startDate).slice(0, 5)} a ${fmtDateShort(b.endDate).slice(0, 5)}`;
+  return `<button class="block-banner" data-action="edit-block" data-id="${b.id}">
+    ${icon('lock')}
+    <div><b>Dia bloqueado</b><span>${esc(b.reason || 'Sem motivo informado')}${range}</span></div>
+    <span class="block-edit">Editar</span>
+  </button>`;
+}
+
+function blockCard(b) {
+  return `<button class="block-card" data-action="edit-block" data-id="${b.id}">
+    <div class="appt-time"><strong>${b.startTime}</strong><span>${b.endTime}</span></div>
+    ${icon('lock')}
+    <div class="appt-body">
+      <div class="appt-title"><span>Bloqueado</span></div>
+      <div class="appt-sub">${esc(b.reason || 'Sem motivo informado')}</div>
+    </div>
+  </button>`;
 }
 
 function apptCard(a) {
@@ -691,6 +750,7 @@ function openApptForm(appt, preset = {}) {
         }
         if (!hint.classList.contains('warn')) {
           if (!date) hint.textContent = '';
+          else if (fullDayBlock(date)) hint.textContent = 'Este dia está bloqueado. Use "Outro horário" para encaixar mesmo assim.';
           else if (!isWorkDay(date)) hint.textContent = 'Este dia está marcado como fechado. Use "Outro horário" para encaixar.';
           else if (!duration) hint.textContent = 'Selecione os serviços para ver os horários livres.';
           else hint.textContent = `${times.length} ${times.length === 1 ? 'horário livre' : 'horários livres'} para ${fmtDuration(duration)}.`;
@@ -738,6 +798,13 @@ function openApptForm(appt, preset = {}) {
           const ok = await confirmDialog(
             `Esse horário coincide com ${conflict.clientName} (${conflict.start} – ${fromMin(toMin(conflict.start) + conflict.duration)}).`,
             { title: 'Horário ocupado', ok: 'Agendar mesmo assim' });
+          if (!ok) return;
+        }
+        const block = findBlock(date, toMin(start), duration);
+        if (block) {
+          const ok = await confirmDialog(
+            `Esse horário está bloqueado (${blockLabel(block)}${block.reason ? ` · ${block.reason}` : ''}).`,
+            { title: 'Horário bloqueado', ok: 'Agendar mesmo assim' });
           if (!ok) return;
         }
 
@@ -809,6 +876,112 @@ async function offerChangeNotice(before, after) {
   }
   const ok = await confirmDialog(`Vamos abrir o WhatsApp com uma mensagem pronta para ${after.clientName}.`, { title, ok: 'Abrir WhatsApp' });
   if (ok) window.open(waLink(after.phone, text), '_blank', 'noopener');
+}
+
+/* ============================================================
+   Formulário de bloqueio
+   ============================================================ */
+function openBlockForm(block, preset = {}) {
+  const isEdit = !!block;
+  const b = block ? { ...block } : {
+    startDate: preset.date || ui.date, endDate: preset.date || ui.date, startTime: '', endTime: '', reason: '',
+  };
+
+  openSheet({
+    title: isEdit ? 'Editar bloqueio' : 'Bloquear agenda',
+    body: `<form id="blk-form" class="form" autocomplete="off" novalidate>
+      <p class="notice-soft">${icon('lock')} As clientes não conseguem agendar no período bloqueado. O motivo fica visível só para você.</p>
+      <div class="field">
+        <span class="label">O que bloquear</span>
+        <div class="segmented seg-2">
+          <label><input type="radio" name="kind" value="day"><span>Dia inteiro</span></label>
+          <label><input type="radio" name="kind" value="period"><span>Período do dia</span></label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="b-from">De</label><input id="b-from" type="date"></div>
+        <div class="field"><label for="b-to">Até</label><input id="b-to" type="date"></div>
+      </div>
+      <p class="hint">Para um único dia, deixe as duas datas iguais. Para férias, escolha o período todo.</p>
+      <div class="row" id="b-times">
+        <div class="field"><label for="b-start">Das</label><input id="b-start" type="time" step="300"></div>
+        <div class="field"><label for="b-end">Às</label><input id="b-end" type="time" step="300"></div>
+      </div>
+      <div class="field">
+        <label for="b-reason">Motivo <span class="muted">(opcional)</span></label>
+        <input id="b-reason" maxlength="80" placeholder="Ex.: folga, feriado, consulta médica">
+      </div>
+      <div id="b-conflicts"></div>
+    </form>`,
+    footer: `${isEdit ? `<button type="button" class="btn btn-danger-ghost btn-icon" id="b-del" aria-label="Remover bloqueio">${icon('trash')}</button>` : ''}
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost" data-action="close-sheet">Cancelar</button>
+      <button type="submit" form="blk-form" class="btn btn-primary">${isEdit ? 'Salvar' : 'Bloquear'}</button>`,
+    onMount() {
+      const f = $('#blk-form');
+      const from = $('#b-from'), to = $('#b-to'), start = $('#b-start'), end = $('#b-end');
+      from.value = b.startDate;
+      to.value = b.endDate;
+      start.value = b.startTime || '12:00';
+      end.value = b.endTime || '13:00';
+      $('#b-reason').value = b.reason || '';
+      $(`input[name=kind][value=${b.startTime ? 'period' : 'day'}]`, f).checked = true;
+
+      const kind = () => $('input[name=kind]:checked', f).value;
+
+      // Mostra os agendamentos que já existem dentro do período escolhido
+      function refresh() {
+        $('#b-times').hidden = kind() !== 'period';
+        if (from.value && (!to.value || to.value < from.value)) to.value = from.value;
+        const period = kind() === 'period' && start.value && end.value ? [toMin(start.value), toMin(end.value)] : [0, 1440];
+        const hits = db.appointments
+          .filter(a => isActive(a) && a.date >= from.value && a.date <= to.value)
+          .filter(a => toMin(a.start) < period[1] && toMin(a.start) + a.duration > period[0])
+          .sort((x, y) => (x.date + x.start).localeCompare(y.date + y.start));
+        $('#b-conflicts').innerHTML = hits.length ? `<div class="notice">${icon('alert')}<p>
+          <b>${hits.length} agendamento${hits.length === 1 ? '' : 's'} neste período</b> continua${hits.length === 1 ? '' : 'm'} marcado${hits.length === 1 ? '' : 's'}.
+          Se precisar, remarque ou cancele pela agenda:<br>
+          ${hits.slice(0, 5).map(a => `${fmtDateShort(a.date).slice(0, 5)} às ${a.start} · ${esc(a.clientName)}`).join('<br>')}
+          ${hits.length > 5 ? `<br>e mais ${hits.length - 5}…` : ''}</p></div>` : '';
+      }
+      refresh();
+      f.addEventListener('change', refresh);
+
+      f.addEventListener('submit', async e => {
+        e.preventDefault();
+        const isPeriod = kind() === 'period';
+        if (!from.value || !to.value) return toast('Escolha as datas.');
+        if (to.value < from.value) return toast('A data final deve ser depois da inicial.');
+        if (isPeriod && (!start.value || !end.value || start.value >= end.value)) return toast('O horário final deve ser depois do inicial.');
+        const record = {
+          ...b,
+          startDate: from.value,
+          endDate: to.value,
+          startTime: isPeriod ? start.value : '',
+          endTime: isPeriod ? end.value : '',
+          reason: $('#b-reason').value.trim(),
+        };
+        await withBusy($('.sheet-foot [type=submit]'), async () => {
+          putLocal('blocks', await API.saveBlock(record));
+          closeSheet();
+          render();
+          toast(isEdit ? 'Bloqueio atualizado' : 'Agenda bloqueada');
+        });
+      });
+
+      $('#b-del')?.addEventListener('click', async e => {
+        const ok = await confirmDialog('O período volta a ficar disponível para agendamentos.', { title: 'Remover bloqueio?', ok: 'Remover', danger: true });
+        if (!ok) return;
+        await withBusy(e.currentTarget, async () => {
+          await API.deleteBlock(b.id);
+          db.blocks = db.blocks.filter(x => x.id !== b.id);
+          closeSheet();
+          render();
+          toast('Bloqueio removido');
+        });
+      });
+    },
+  });
 }
 
 /* ============================================================
@@ -1097,6 +1270,15 @@ function renderSettings() {
     </section>
 
     <section class="card pad">
+      <div class="card-head">
+        <h2>Bloqueios de agenda</h2>
+        <button class="btn btn-ghost btn-sm" data-action="new-block">${icon('plus')} Novo</button>
+      </div>
+      <p class="muted small" style="margin:-6px 0 12px">Folgas, feriados, férias ou compromissos. As clientes não conseguem agendar nesses períodos.</p>
+      ${upcomingBlocksHtml()}
+    </section>
+
+    <section class="card pad">
       <h2>Cor do aplicativo</h2>
       <div class="swatches">${ACCENTS.map(c => `
         <label><input type="radio" name="accent" data-setting="accent" value="${c}" ${s.accent === c ? 'checked' : ''}><span style="background:${c}"></span></label>`).join('')}
@@ -1112,6 +1294,18 @@ function renderSettings() {
       </div>
     </section>
   </div>`;
+}
+
+function upcomingBlocksHtml() {
+  const list = db.blocks
+    .filter(b => b.endDate >= todayKey())
+    .sort((x, y) => (x.startDate + (x.startTime || '')).localeCompare(y.startDate + (y.startTime || '')));
+  if (!list.length) return '<p class="muted small" style="margin:0">Nenhum bloqueio programado.</p>';
+  return `<div class="history">${list.map(b => `
+    <button type="button" data-action="edit-block" data-id="${b.id}">
+      <div class="h-main"><strong>${blockLabel(b)}</strong><span>${esc(b.reason || 'Sem motivo informado')}</span></div>
+      <div class="h-side">${icon('chevRight')}</div>
+    </button>`).join('')}</div>`;
 }
 
 async function onSettingChange(el) {
@@ -1235,6 +1429,8 @@ const ACTIONS = {
   'fin-day': el => { ui.finPeriod = 'dia'; ui.finAnchor = el.dataset.date; render(); window.scrollTo(0, 0); },
   'new-appt': el => openApptForm(null, { date: el.dataset.date || ui.date, start: el.dataset.start || '', clientId: el.dataset.client }),
   'edit-appt': el => { const a = db.appointments.find(x => x.id === el.dataset.id); if (a) openApptForm(a); },
+  'new-block': el => openBlockForm(null, { date: el.dataset.date || (currentRoute() === 'agenda' ? ui.date : todayKey()) }),
+  'edit-block': el => { const b = db.blocks.find(x => x.id === el.dataset.id); if (b) openBlockForm(b); },
   'new-service': () => openServiceForm(null),
   'edit-service': el => { const s = db.services.find(x => x.id === el.dataset.id); if (s) openServiceForm(s); },
   'new-client': () => openClientForm(null),

@@ -14,7 +14,9 @@ const totals = () => {
   const list = selectedServices();
   return { duration: sum(list, s => s.duration), price: sum(list, s => s.price) };
 };
-const isWorkDay = k => st.info.settings.workDays.includes(parseKey(k).getDay());
+// Dia de atendimento e sem bloqueio de dia inteiro (que chega como 00:00 com 1440 minutos)
+const isWorkDay = k => st.info.settings.workDays.includes(parseKey(k).getDay()) &&
+  !st.busy.some(b => b.date === k && b.duration >= 1440);
 const slotsFor = k => (isWorkDay(k) ? computeSlots(st.info.settings, st.busy, k, totals().duration) : []);
 const nextDays = () => Array.from({ length: HORIZON }, (_, i) => dateKey(addDays(new Date(), i)));
 

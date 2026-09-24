@@ -68,6 +68,22 @@ create table if not exists public.appointments (
 create index if not exists appointments_date_idx on public.appointments (date);
 create index if not exists appointments_client_idx on public.appointments (client_id);
 
+-- Bloqueios de agenda: um dia, vários dias seguidos ou um período do dia.
+-- Sem horário (start_time/end_time nulos) = dia inteiro bloqueado.
+create table if not exists public.blocks (
+  id         uuid primary key default gen_random_uuid(),
+  start_date date not null,
+  end_date   date not null,
+  start_time text check (start_time ~ '^\d{2}:\d{2}$'),
+  end_time   text check (end_time ~ '^\d{2}:\d{2}$'),
+  reason     text not null default '',  -- visível só para a dona
+  created_at timestamptz not null default now(),
+  constraint blocks_dates_check check (end_date >= start_date),
+  constraint blocks_times_pair check ((start_time is null) = (end_time is null)),
+  constraint blocks_times_order check (start_time is null or start_time < end_time)
+);
+create index if not exists blocks_dates_idx on public.blocks (start_date, end_date);
+
 -- Serviços iniciais (só entram se a tabela estiver vazia)
 insert into public.services (name, price, duration, color, sort)
 select * from (values
@@ -115,6 +131,7 @@ alter table public.settings     enable row level security;
 alter table public.services     enable row level security;
 alter table public.clients      enable row level security;
 alter table public.appointments enable row level security;
+alter table public.blocks       enable row level security;
 
 drop policy if exists "admin lê o próprio acesso" on public.admins;
 create policy "admin lê o próprio acesso" on public.admins
@@ -142,7 +159,12 @@ drop policy if exists "admin gerencia agendamentos" on public.appointments;
 create policy "admin gerencia agendamentos" on public.appointments
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists "admin gerencia bloqueios" on public.blocks;
+create policy "admin gerencia bloqueios" on public.blocks
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
 grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.blocks to authenticated;
 grant select on public.settings, public.services to anon;
 grant select, insert, update, delete on public.services, public.clients, public.appointments to authenticated;
 grant select, update on public.settings to authenticated;
@@ -153,15 +175,25 @@ grant execute on function public.to_min(text) to anon, authenticated;
 
 -- ---------- Funções da página pública ----------
 
--- Horários ocupados (sem nenhum dado das clientes)
+-- Horários ocupados: agendamentos + bloqueios (sem nomes nem motivos).
+-- Dia inteiro bloqueado aparece como 00:00 com 1440 minutos.
 create or replace function public.busy_slots(p_from date, p_to date)
 returns table (day date, start_time text, duration int)
 language sql stable security definer set search_path = public as $$
   select a.date, a.start_time, a.duration
-  from public.appointments a
-  where a.date between p_from and p_to
-    and a.status <> 'cancelado'
-    and p_to - p_from <= 62
+    from public.appointments a
+   where a.date between p_from and p_to
+     and a.status <> 'cancelado'
+     and p_to - p_from <= 62
+  union all
+  select d::date,
+         coalesce(b.start_time, '00:00'),
+         case when b.start_time is null then 1440
+              else public.to_min(b.end_time) - public.to_min(b.start_time) end
+    from public.blocks b
+   cross join generate_series(greatest(b.start_date, p_from), least(b.end_date, p_to), interval '1 day') as d
+   where b.end_date >= p_from and b.start_date <= p_to
+     and p_to - p_from <= 62
 $$;
 
 -- Cria um agendamento feito pela cliente. Valida tudo no servidor:
@@ -218,6 +250,14 @@ begin
   if v_start < public.to_min(s.open_time) or v_start + v_duration > public.to_min(s.close_time) then
     raise exception 'Horário fora do expediente.';
   end if;
+  if exists (
+    select 1 from public.blocks b
+     where p_date between b.start_date and b.end_date
+       and (b.start_time is null
+            or (v_start < public.to_min(b.end_time) and v_start + v_duration > public.to_min(b.start_time)))
+  ) then
+    raise exception 'Esse horário não está disponível. Escolha outro.';
+  end if;
   if p_date + p_start::time < v_now then
     raise exception 'Esse horário já passou.';
   end if;
@@ -272,7 +312,12 @@ grant execute on function public.busy_slots(date, date) to anon, authenticated;
 
 -- ---------- Tempo real (o painel atualiza sozinho quando uma cliente agenda) ----------
 do $$
+declare t text;
 begin
-  alter publication supabase_realtime add table public.appointments, public.clients, public.services;
-exception when duplicate_object then null;
+  foreach t in array array['appointments', 'clients', 'services', 'blocks'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then null;  -- já estava na publicação
+    end;
+  end loop;
 end $$;
