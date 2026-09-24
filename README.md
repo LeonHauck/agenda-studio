@@ -1,61 +1,111 @@
+<div align="center">
+
+<img src="icons/icon-192.png" alt="Agenda Studio" width="96" height="96">
+
 # Agenda Studio
 
-Sistema de agendamentos para manicures, salões e profissionais de beleza.
+**Agendamento online para salões, manicures e profissionais de beleza**
 
-- **Página pública** (`/`): o link enviado às clientes. Elas escolhem serviços, dia e horário livre e confirmam.
-- **Painel da dona** (`/admin`): protegido por login. Agenda, serviços, clientes, finanças e ajustes.
+As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clientes e finanças num painel próprio.
 
-Os dados ficam no **Supabase** (banco de dados na nuvem). As regras de segurança do banco garantem que
-as clientes só consigam ver serviços e horários livres e criar agendamentos. Todo o resto é visível
-apenas para a dona.
+[![Site](https://img.shields.io/badge/🌐_Agendar-leonhauck.github.io-b4537a?style=for-the-badge)](https://leonhauck.github.io/agenda-studio/)
+[![Painel](https://img.shields.io/badge/🔒_Painel-admin-1c1a19?style=for-the-badge)](https://leonhauck.github.io/agenda-studio/admin/)
 
-## Estrutura
+![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white)
+![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=flat-square&logo=supabase&logoColor=white)
+![GitHub Pages](https://img.shields.io/badge/GitHub_Pages-222222?style=flat-square&logo=githubpages&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-instalável-5A0FC8?style=flat-square&logo=pwa&logoColor=white)
+
+</div>
+
+---
+
+## ✨ Funcionalidades
+
+### 💅 Para as clientes (link público)
+- 🛍️ Escolha de um ou mais serviços, com **valor e duração somados** automaticamente
+- 📅 Somente **horários realmente livres**, que comportam a duração escolhida
+- ✅ Agendamento **confirmado na hora**, sem precisar criar conta
+- 📲 Atalhos para salvar na agenda do celular e falar com o estúdio pelo WhatsApp
+
+### 🔒 Para a dona (painel com login)
+| | Aba | O que faz |
+|---|---|---|
+| 📆 | **Agenda** | Visão semanal, horários livres, encaixes, status e remarcação com aviso por WhatsApp |
+| 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
+| 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago e atalho para WhatsApp |
+| 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
+| ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, cor do app, link e backup |
+
+- 🔔 Atualização em **tempo real** quando uma cliente agenda
+- 📱 **Instalável** no celular como aplicativo (Android e iPhone)
+- 🌗 Tema claro e escuro automáticos
+
+---
+
+## 🛡️ Segurança
+
+As regras ficam **no banco de dados** (Row Level Security do Supabase), não no site:
+
+| Quem | Pode |
+|---|---|
+| 🌐 Visitante | Ver serviços ativos e horários ocupados (**sem nomes**) e criar agendamentos pela função `book_appointment` |
+| 🔒 Dona (tabela `admins`) | Ler e editar tudo |
+
+A função de agendamento valida no servidor os serviços, o expediente, horários no passado, conflitos e o limite de 3 horários futuros por telefone.
+
+---
+
+## 🗂️ Estrutura
 
 ```
-index.html            página pública de agendamento
-admin/index.html      painel da dona (login)
-admin/sw.js           permite instalar o painel como app no celular
-css/styles.css        estilos (tema claro/escuro automático)
-js/config.js          URL e chave pública do Supabase  ← preencher
-js/core.js            funções compartilhadas
-js/api.js             comunicação com o Supabase
-js/admin.js           lógica do painel
-js/public.js          lógica da página pública
-supabase/schema.sql   tabelas, regras de segurança e funções do banco
+📁 agenda-studio
+├── 📄 index.html             página pública de agendamento
+├── 📁 admin
+│   ├── 📄 index.html         painel da dona (login)
+│   ├── 📄 manifest.webmanifest
+│   └── 📄 sw.js              instalação como app (PWA)
+├── 📁 css
+│   └── 🎨 styles.css         estilos (tema claro/escuro)
+├── 📁 js
+│   ├── ⚙️ config.js          URL e chave pública do Supabase
+│   ├── 🧩 core.js            funções compartilhadas
+│   ├── 🔌 api.js             comunicação com o Supabase
+│   ├── 🔒 admin.js           lógica do painel
+│   └── 🌐 public.js          lógica da página pública
+├── 📁 icons                  ícones do app (SVG e PNG)
+└── 📁 supabase
+    └── 🗄️ schema.sql         tabelas, regras de segurança e funções
 ```
 
-## Passo a passo — Supabase
+---
 
-1. Crie uma conta em https://supabase.com e clique em **New project**.
-   Escolha um nome, crie uma senha forte para o banco e a região **South America (São Paulo)**.
-2. No menu lateral, abra **SQL Editor → New query**, cole todo o conteúdo de `supabase/schema.sql` e clique em **Run**.
-3. Em **Authentication → Users → Add user → Create new user**, cadastre o e-mail e a senha da dona
-   (marque **Auto Confirm User**).
-4. Volte ao **SQL Editor** e rode (trocando o e-mail):
+## 🚀 Instalação
+
+### 1️⃣ Supabase
+1. Crie um projeto em [supabase.com](https://supabase.com), na região **South America (São Paulo)**.
+2. Em **SQL Editor**, rode todo o conteúdo de [`supabase/schema.sql`](supabase/schema.sql).
+3. Em **Authentication → Users**, crie o usuário da dona (**Auto Confirm User**).
+4. Dê acesso de administradora:
    ```sql
    insert into public.admins (user_id)
    select id from auth.users where email = 'email-da-dona@exemplo.com';
    ```
-5. Em **Authentication → Sign In / Providers**, **desative** "Allow new users to sign up".
-   Assim ninguém consegue criar conta sozinho.
-6. Em **Project Settings → API Keys** (e **Data API** para a URL), copie a **Project URL** e a chave
-   **publishable** (ou **anon**) e cole em `js/config.js`.
-   Nunca use a chave **secret / service_role** no site.
+5. Em **Authentication → Sign In / Providers**, desative **Allow new users to sign up**.
+6. Copie a **Project URL** e a chave **publishable** para [`js/config.js`](js/config.js).
 
-## Testar no computador
+> [!WARNING]
+> Nunca coloque a chave **secret / service_role** no site. A chave publishable foi feita para ficar pública.
 
+### 2️⃣ Testar localmente
 Dê dois cliques em `iniciar.bat` (requer Python) e acesse:
-- http://localhost:5500 — página das clientes
-- http://localhost:5500/admin — painel da dona
+- 🌐 http://localhost:5500: página das clientes
+- 🔒 http://localhost:5500/admin: painel da dona
 
-## Publicação (GitHub Pages)
-
-O site é publicado automaticamente pelo GitHub Pages a cada `git push` na branch `main`.
-
-- Link das clientes: https://leonhauck.github.io/agenda-studio/
-- Painel da dona: https://leonhauck.github.io/agenda-studio/admin/
-
-Para publicar uma alteração:
+### 3️⃣ Publicar (GitHub Pages)
+O site é publicado automaticamente a cada `git push` na branch `main`:
 
 ```bash
 git add .
@@ -63,4 +113,24 @@ git commit -m "Descreva a alteração"
 git push
 ```
 
-A atualização aparece no site em 1 a 2 minutos.
+> [!TIP]
+> A atualização aparece no site em 1 a 2 minutos. Se não aparecer, use **Ctrl+F5**.
+
+---
+
+## 🛣️ Próximas ideias
+- [ ] 🚫 Bloqueio de datas e horários (folgas, almoço, feriados)
+- [ ] ⏰ Lembrete automático para a cliente um dia antes
+- [ ] 🔁 Link para a cliente remarcar ou cancelar sozinha
+- [ ] 🔑 Recuperação de senha por e-mail
+
+---
+
+<div align="center">
+
+Desenvolvido por **[Leon Hauck](https://www.linkedin.com/in/leon-hauck/)**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-leon--hauck-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/leon-hauck/)
+[![GitHub](https://img.shields.io/badge/GitHub-LeonHauck-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/LeonHauck)
+
+</div>
