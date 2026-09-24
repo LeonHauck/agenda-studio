@@ -16,6 +16,7 @@ const API = (() => {
     if (/Email not confirmed/i.test(m)) return 'Este e-mail ainda não foi confirmado.';
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sem conexão com a internet. Tente novamente.';
     if (/JWT|permission denied|row-level security/i.test(m)) return 'Sem permissão. Entre novamente.';
+    if (/invalid input syntax for type uuid/i.test(m)) return 'Link inválido. Confira o endereço recebido.';
     return m;
   }
   function check(error) {
@@ -34,6 +35,7 @@ const API = (() => {
     workDays: (r.work_days || []).map(Number),
     slotInterval: Number(r.slot_interval) || 15,
     accent: r.accent,
+    changeNoticeHours: r.change_notice_hours ?? 2,
   });
   const settingsTo = s => ({
     business_name: s.businessName,
@@ -43,6 +45,7 @@ const API = (() => {
     work_days: s.workDays,
     slot_interval: s.slotInterval,
     accent: s.accent,
+    change_notice_hours: s.changeNoticeHours ?? 2,
   });
   const serviceFrom = r => ({
     id: r.id, name: r.name, price: Number(r.price), duration: r.duration, color: r.color, active: r.active, sort: r.sort,
@@ -67,6 +70,10 @@ const API = (() => {
     notes: r.notes || '',
     source: r.source,
     createdAt: r.created_at,
+    manageToken: r.manage_token,
+    clientAction: r.client_action || '',
+    clientActionAt: r.client_action_at,
+    reminderSentAt: r.reminder_sent_at,
   });
   const apptTo = a => withId(a, {
     client_id: a.clientId || null,
@@ -80,6 +87,7 @@ const API = (() => {
     status: a.status,
     payment_method: a.payment || null,
     notes: a.notes || '',
+    reminder_sent_at: a.reminderSentAt || null,
   });
   const blockFrom = r => ({
     id: r.id, startDate: r.start_date, endDate: r.end_date,
@@ -168,6 +176,12 @@ const API = (() => {
     },
     saveAppointment: async a => apptFrom(await saveRow('appointments', apptTo(a))),
     deleteAppointment: id => deleteRow('appointments', id),
+    async markReminderSent(id) {
+      const { data, error } = await sb.from('appointments')
+        .update({ reminder_sent_at: new Date().toISOString() }).eq('id', id).select().single();
+      check(error);
+      return apptFrom(data);
+    },
     saveBlock: async b => blockFrom(await saveRow('blocks', blockTo(b))),
     deleteBlock: id => deleteRow('blocks', id),
 
@@ -190,8 +204,8 @@ const API = (() => {
       ]);
       return { settings, services };
     },
-    async busySlots(from, to) {
-      const { data, error } = await sb.rpc('busy_slots', { p_from: from, p_to: to });
+    async busySlots(from, to, excludeToken = null) {
+      const { data, error } = await sb.rpc('busy_slots', { p_from: from, p_to: to, p_exclude_token: excludeToken });
       check(error);
       return data.map(r => ({ date: r.day, start: r.start_time, duration: r.duration }));
     },
@@ -199,6 +213,22 @@ const API = (() => {
       const { data, error } = await sb.rpc('book_appointment', {
         p_name: name, p_phone: phone, p_service_ids: serviceIds, p_date: date, p_start: start, p_notes: notes || '',
       });
+      check(error);
+      return data;
+    },
+
+    /* ---------- Link pessoal da cliente (remarcar / cancelar) ---------- */
+    async getBooking(token) {
+      const { data, error } = await sb.rpc('get_booking', { p_token: token });
+      check(error);
+      return data;
+    },
+    async cancelBooking(token) {
+      const { error } = await sb.rpc('cancel_booking', { p_token: token });
+      check(error);
+    },
+    async rescheduleBooking(token, date, start) {
+      const { data, error } = await sb.rpc('reschedule_booking', { p_token: token, p_date: date, p_start: start });
       check(error);
       return data;
     },

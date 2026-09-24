@@ -29,6 +29,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 - 📅 Somente **horários realmente livres**, que comportam a duração escolhida
 - ✅ Agendamento **confirmado na hora**, sem precisar criar conta
 - 📲 Atalhos para salvar na agenda do celular e falar com o estúdio pelo WhatsApp
+- 🔁 **Link pessoal** para ver, remarcar ou cancelar o próprio horário (dentro do prazo definido pela dona)
 
 ### 🔒 Para a dona (painel com login)
 | | Aba | O que faz |
@@ -40,7 +41,8 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
 | ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, cor do app, link e backup |
 
-- 🔔 Atualização em **tempo real** quando uma cliente agenda
+- 🔔 Atualização em **tempo real** quando uma cliente agenda, remarca ou cancela
+- ⏰ **Lembretes** do próximo dia com mensagem pronta no WhatsApp, incluindo o link de remarcação
 - 📱 **Instalável** no celular como aplicativo (Android e iPhone)
 - 🌗 Tema claro e escuro automáticos
 
@@ -53,6 +55,7 @@ As regras ficam **no banco de dados** (Row Level Security do Supabase), não no 
 | Quem | Pode |
 |---|---|
 | 🌐 Visitante | Ver serviços ativos e horários ocupados (**sem nomes**) e criar agendamentos pela função `book_appointment` |
+| 🔗 Cliente com link pessoal | Ver, remarcar ou cancelar **somente o próprio horário** (`get_booking`, `reschedule_booking`, `cancel_booking`) |
 | 🔒 Dona (tabela `admins`) | Ler e editar tudo |
 
 A função de agendamento valida no servidor os serviços, o expediente, horários no passado, conflitos e o limite de 3 horários futuros por telefone.
@@ -122,8 +125,9 @@ git push
 ## 🛣️ Próximas ideias
 - [x] 🚫 Bloqueio de datas e horários (folgas, feriados, férias)
 - [ ] 🍽️ Bloqueios recorrentes (ex.: almoço todos os dias)
-- [ ] ⏰ Lembrete automático para a cliente um dia antes
-- [ ] 🔁 Link para a cliente remarcar ou cancelar sozinha
+- [x] ⏰ Lembretes com mensagem pronta no WhatsApp
+- [x] 🔁 Link para a cliente remarcar ou cancelar sozinha
+- [ ] 🤖 Envio 100% automático dos lembretes (API do WhatsApp, serviço pago)
 - [ ] 🔑 Recuperação de senha por e-mail
 
 ---

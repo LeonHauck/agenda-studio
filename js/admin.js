@@ -36,6 +36,13 @@ const availableSlots = (date, duration, excludeId) =>
 const findClientByName = name => db.clients.find(x => x.name.trim().toLowerCase() === name.trim().toLowerCase());
 const publicUrl = () => new URL('../', location.href).href;
 const MAX_INTERVAL = 240; // mesmo limite do banco (settings.slot_interval)
+const manageUrl = a => (a.manageToken ? `${publicUrl()}?r=${a.manageToken}` : '');
+const clientCanManage = () => db.settings.changeNoticeHours >= 0;
+// Trecho com o link de remarcar/cancelar, para anexar às mensagens de WhatsApp
+const manageLine = a => (clientCanManage() && a.manageToken
+  ? `
+
+Se precisar remarcar ou cancelar: ${manageUrl(a)}` : '');
 
 function dayAppointments(k) {
   return db.appointments
@@ -131,6 +138,12 @@ function startRealtime() {
     const row = payload.new;
     if (table === 'appointments' && payload.eventType === 'INSERT' && row?.source === 'online') {
       toast(`Novo agendamento online: ${row.client_name}, ${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`);
+    }
+    if (table === 'appointments' && payload.eventType === 'UPDATE' && row?.client_action && row.client_action_at &&
+        Date.now() - Date.parse(row.client_action_at) < 60000) {
+      toast(row.client_action === 'cancelou'
+        ? `${row.client_name} cancelou o horário de ${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`
+        : `${row.client_name} remarcou para ${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`);
     }
     scheduleReload();
   });
@@ -237,6 +250,8 @@ function renderAgenda() {
       <div class="week">${week}</div>
     </section>
 
+    ${reminderBanner()}
+
     <section class="stats">
       <div class="stat"><span>Atendimentos</span><strong>${active.length}</strong></div>
       <div class="stat"><span>Previsto</span><strong>${moneyShort(sum(active, a => a.price))}</strong></div>
@@ -321,6 +336,13 @@ function blockCard(b) {
   </button>`;
 }
 
+function apptTags(a) {
+  if (a.clientAction === 'cancelou' && a.status === 'cancelado') return '<span class="tag tag-warn">cancelado pela cliente</span>';
+  if (a.clientAction === 'remarcou' && isActive(a)) return '<span class="tag tag-info">remarcado pela cliente</span>';
+  if (a.source === 'online') return `<span class="tag" title="Agendado pela cliente">${icon('globe')}online</span>`;
+  return '';
+}
+
 function apptCard(a) {
   const status = STATUS[a.status] ? a.status : 'agendado';
   const color = a.services[0]?.color || 'var(--accent)';
@@ -329,7 +351,7 @@ function apptCard(a) {
     <div class="appt-time"><strong>${a.start}</strong><span>${fromMin(toMin(a.start) + a.duration)}</span></div>
     <span class="appt-bar" style="background:${esc(color)}"></span>
     <div class="appt-body">
-      <div class="appt-title"><span>${esc(a.clientName)}</span>${a.source === 'online' ? `<span class="tag" title="Agendado pela cliente">${icon('globe')}online</span>` : ''}</div>
+      <div class="appt-title"><span>${esc(a.clientName)}</span>${apptTags(a)}</div>
       <div class="appt-sub">${esc(names)} · ${fmtDuration(a.duration)}</div>
     </div>
     <div class="appt-side">
@@ -684,6 +706,7 @@ function openApptForm(appt, preset = {}) {
         <div class="field"><label for="f-price">Valor (R$)</label><input id="f-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0,00"></div>
       </div>
       ${statusHtml}
+      ${isEdit && a.manageToken && clientCanManage() ? `<button type="button" class="link-btn" data-action="copy-manage" data-id="${a.id}">${icon('link')} Copiar link da cliente para remarcar ou cancelar</button>` : ''}
       <div class="field">
         <label for="f-pay">Forma de pagamento</label>
         <select id="f-pay">
@@ -777,7 +800,7 @@ function openApptForm(appt, preset = {}) {
       const waBtn = $('#f-wa');
       if (waBtn) {
         const names = a.services.map(s => s.name).join(' + ');
-        waBtn.href = waLink(a.phone, `Olá, ${firstName(a.clientName)}! Passando para confirmar seu horário no ${db.settings.businessName}: ${fmtDateLong(a.date)}, às ${a.start} (${names}). Posso confirmar?`);
+        waBtn.href = waLink(a.phone, `Olá, ${firstName(a.clientName)}! Passando para confirmar seu horário no ${db.settings.businessName}: ${fmtDateLong(a.date)}, às ${a.start} (${names}). Posso confirmar?${manageLine(a)}`);
       }
 
       f.addEventListener('submit', async e => {
@@ -832,6 +855,7 @@ function openApptForm(appt, preset = {}) {
             status,
             payment: $('#f-pay').value,
             notes: $('#f-notes').value.trim(),
+            reminderSentAt: isEdit && date === appt.date && start === appt.start ? a.reminderSentAt : null,
           });
           putLocal('appointments', saved);
         });
@@ -870,12 +894,99 @@ async function offerChangeNotice(before, after) {
     text = `Olá, ${nome}! Seu horário no ${biz} de ${fmtDateLong(before.date)}, às ${before.start}, foi cancelado. Quer remarcar para outro dia?`;
   } else if (isActive(after) && (before.date !== after.date || before.start !== after.start)) {
     title = 'Avisar a cliente sobre a mudança?';
-    text = `Olá, ${nome}! Precisei ajustar seu horário no ${biz}. O novo horário é ${fmtDateLong(after.date)}, às ${after.start}. Pode ser?`;
+    text = `Olá, ${nome}! Precisei ajustar seu horário no ${biz}. O novo horário é ${fmtDateLong(after.date)}, às ${after.start}. Pode ser?${manageLine(after)}`;
   } else {
     return;
   }
   const ok = await confirmDialog(`Vamos abrir o WhatsApp com uma mensagem pronta para ${after.clientName}.`, { title, ok: 'Abrir WhatsApp' });
   if (ok) window.open(waLink(after.phone, text), '_blank', 'noopener');
+}
+
+/* ============================================================
+   Lembretes (enviados pelo WhatsApp da dona, com mensagem pronta)
+   ============================================================ */
+const reminderTargets = k => dayAppointments(k).filter(a => isActive(a) && a.phone);
+
+// Próximo dia (a partir de amanhã) que tem clientes para lembrar
+function nextReminderDate() {
+  for (let i = 1; i <= 7; i++) {
+    const k = dateKey(addDays(new Date(), i));
+    if (reminderTargets(k).length) return k;
+  }
+  return dateKey(addDays(new Date(), 1));
+}
+
+function whenLabel(k) {
+  return k === dateKey(addDays(new Date(), 1)) ? 'amanhã' : `${DOW_LONG[parseKey(k).getDay()].split('-')[0]}, ${fmtDateShort(k).slice(0, 5)}`;
+}
+
+function reminderBanner() {
+  const k = nextReminderDate();
+  const list = reminderTargets(k);
+  const pending = list.filter(a => !a.reminderSentAt).length;
+  if (!pending) return '';
+  return `<button class="reminder-banner" data-action="open-reminders">
+    ${icon('bell')}
+    <div><b>${pending} lembrete${pending === 1 ? '' : 's'} para enviar</b><span>Clientes de ${whenLabel(k)}</span></div>
+    <span class="block-edit">Enviar</span>
+  </button>`;
+}
+
+function reminderText(a) {
+  const tomorrow = a.date === dateKey(addDays(new Date(), 1));
+  const when = tomorrow ? `amanhã (${fmtDateLong(a.date)})` : fmtDateLong(a.date);
+  const names = a.services.map(x => x.name).join(' + ');
+  return `Olá, ${firstName(a.clientName)}! 💅 Passando para lembrar do seu horário no ${db.settings.businessName}: ` +
+    `${when}, às ${a.start} (${names}).
+
+Te espero!${manageLine(a)}`;
+}
+
+function openReminders() {
+  let target = nextReminderDate();
+
+  const rowHtml = a => `<div class="rem-row" data-row="${a.id}">
+    <div class="h-main"><strong>${a.start} · ${esc(a.clientName)}</strong>
+      <span>${esc(a.services.map(x => x.name).join(' + '))}${a.reminderSentAt ? ' · <b class="sent">Enviado ✓</b>' : ''}</span></div>
+    <a class="btn btn-sm ${a.reminderSentAt ? 'btn-ghost' : 'btn-primary'}" data-rem="${a.id}"
+       href="${waLink(a.phone, reminderText(a))}" target="_blank" rel="noopener">${icon('chat')} ${a.reminderSentAt ? 'Reenviar' : 'Enviar'}</a>
+  </div>`;
+
+  const listHtml = () => {
+    const list = reminderTargets(target);
+    return list.length ? list.map(rowHtml).join('')
+      : '<p class="muted small" style="margin:8px 0 0">Nenhuma cliente com WhatsApp neste dia.</p>';
+  };
+
+  openSheet({
+    title: 'Lembretes',
+    body: `<div class="stack">
+      <p class="notice-soft">${icon('bell')}<span>Toque em <b>Enviar</b>: o WhatsApp abre com a mensagem pronta${clientCanManage() ? ', já com o link para a cliente remarcar ou cancelar' : ''}. É só apertar enviar.</span></p>
+      <div class="field"><label for="rem-date">Clientes do dia</label><input id="rem-date" type="date" value="${target}"></div>
+      <div class="rem-list" id="rem-list">${listHtml()}</div>
+    </div>`,
+    footer: '<span class="spacer"></span><button type="button" class="btn btn-primary" data-action="close-sheet">Concluir</button>',
+    onMount() {
+      $('#rem-date').addEventListener('change', e => {
+        if (!e.target.value) return;
+        target = e.target.value;
+        $('#rem-list').innerHTML = listHtml();
+      });
+      // O link abre o WhatsApp normalmente; em paralelo, marca como enviado
+      $('#rem-list').addEventListener('click', async e => {
+        const btn = e.target.closest('[data-rem]');
+        if (!btn) return;
+        try {
+          const saved = await API.markReminderSent(btn.dataset.rem);
+          putLocal('appointments', saved);
+          $(`[data-row="${saved.id}"]`).outerHTML = rowHtml(saved);
+          render();
+        } catch (err) {
+          console.error(err);
+        }
+      });
+    },
+  });
 }
 
 /* ============================================================
@@ -1270,6 +1381,19 @@ function renderSettings() {
     </section>
 
     <section class="card pad">
+      <h2>Remarcação e cancelamento pela cliente</h2>
+      <div class="form">
+        <div class="field">
+          <label for="set-notice">A cliente pode remarcar ou cancelar pelo link</label>
+          <select id="set-notice" data-setting="changeNoticeHours">${NOTICE_OPTIONS.map(([v, label]) =>
+            `<option value="${v}" ${s.changeNoticeHours === v ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
+          <small class="muted small">Cada agendamento tem um link pessoal, enviado na confirmação e nos lembretes. Depois do prazo, a cliente precisa falar com você pelo WhatsApp.</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="card pad">
       <div class="card-head">
         <h2>Bloqueios de agenda</h2>
         <button class="btn btn-ghost btn-sm" data-action="new-block">${icon('plus')} Novo</button>
@@ -1296,6 +1420,13 @@ function renderSettings() {
   </div>`;
 }
 
+const NOTICE_OPTIONS = [
+  [-1, 'Não permitir (somente pelo WhatsApp)'],
+  [0, 'Até o horário do atendimento'],
+  [1, 'Até 1 hora antes'], [2, 'Até 2 horas antes'], [3, 'Até 3 horas antes'], [6, 'Até 6 horas antes'],
+  [12, 'Até 12 horas antes'], [24, 'Até 24 horas antes'], [48, 'Até 48 horas antes'],
+];
+
 function upcomingBlocksHtml() {
   const list = db.blocks
     .filter(b => b.endDate >= todayKey())
@@ -1314,6 +1445,8 @@ async function onSettingChange(el) {
   const s = db.settings;
   if (key === 'workDays') {
     s.workDays = $$('[data-setting=workDays]:checked').map(i => Number(i.value)).sort();
+  } else if (key === 'changeNoticeHours') {
+    s.changeNoticeHours = Number(el.value);
   } else if (key === 'slotInterval') {
     const min = Math.round(Number(el.value) / 5) * 5;
     if (!min || min < 5 || min > MAX_INTERVAL) {
@@ -1436,6 +1569,17 @@ const ACTIONS = {
   'new-client': () => openClientForm(null),
   'open-client': el => { const c = db.clients.find(x => x.id === el.dataset.id); if (c) openClientForm(c); },
   'close-sheet': el => { closeSheet(); if (el.getAttribute('href')) location.hash = el.getAttribute('href'); },
+  'open-reminders': () => openReminders(),
+  'copy-manage': async el => {
+    const a = db.appointments.find(x => x.id === el.dataset.id);
+    if (!a) return;
+    try {
+      await navigator.clipboard.writeText(manageUrl(a));
+      toast('Link da cliente copiado');
+    } catch {
+      window.prompt('Copie o link:', manageUrl(a));
+    }
+  },
   'set-interval': el => {
     const input = $('#set-step');
     input.value = el.dataset.min;

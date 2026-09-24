@@ -234,7 +234,8 @@ a { color: inherit; text-decoration: none; }
 .appt-time span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .appt-bar { align-self: stretch; border-radius: 4px; min-height: 36px; }
 .appt-body { min-width: 0; }
-.appt-title, .li-title { display: flex; align-items: center; min-width: 0; font-weight: 600; }
+.appt-title, .li-title { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-width: 0; font-weight: 600; }
+.appt-title > span:first-child, .li-title > span:first-child { max-width: 100%; }
 .appt-title > span:first-child, .li-title > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appt-title .tag, .li-title .tag { flex: none; }
 .appt-sub {
@@ -696,6 +697,61 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .segmented.seg-2 { grid-template-columns: repeat(2, 1fr); }
 .history .h-side .i { width: 18px; height: 18px; color: var(--muted); }
+
+/* ---------- Lembretes e link da cliente ---------- */
+.reminder-banner {
+  display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 12px;
+  width: 100%; padding: 14px 16px; text-align: left;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: var(--radius);
+  background: var(--accent-soft); color: var(--text);
+}
+.reminder-banner > .i { color: var(--accent); }
+.reminder-banner b { display: block; }
+.reminder-banner span { font-size: 13px; color: var(--muted); }
+.reminder-banner .block-edit { color: var(--accent); font-size: 14px; }
+
+.rem-list { display: flex; flex-direction: column; }
+.rem-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.rem-row:last-child { border-bottom: 0; }
+.rem-row .h-main { min-width: 0; }
+.rem-row .h-main strong { display: block; font-size: 14px; }
+.rem-row .h-main span { display: block; font-size: 13px; color: var(--muted); }
+.rem-row .sent { color: var(--ok); font-weight: 600; }
+.rem-row .btn { flex: none; }
+
+.link-btn {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  padding: 0; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 600;
+}
+.link-btn .i { width: 16px; height: 16px; }
+
+.tag-warn { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.tag-info { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
+
+.my-bookings { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
+.my-booking {
+  display: grid; grid-template-columns: 22px 1fr 18px; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: var(--radius); background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.my-booking > .i { color: var(--accent); }
+.my-booking b { display: block; font-size: 14px; }
+.my-booking small { display: block; font-size: 12px; color: var(--muted); }
+
+.manage-box {
+  width: 100%; text-align: left; margin: -6px 0 16px; padding: 14px 16px;
+  border-radius: var(--radius); border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.manage-box > b { display: flex; align-items: center; gap: 6px; }
+.manage-box > b .i { width: 16px; height: 16px; color: var(--accent); }
+.manage-box p { margin: 4px 0 10px; font-size: 13px; color: var(--muted); }
+
+.confirm-box { padding: 16px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line)); background: color-mix(in srgb, var(--danger) 5%, var(--surface)); }
+.confirm-box b { display: block; }
+.confirm-box p { margin: 2px 0 12px; font-size: 14px; color: var(--muted); }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.done-icon.is-cancel { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.center { text-align: center; }
 
 /* ---------- Rodapé (crédito) ---------- */
 .credit { margin: 32px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
