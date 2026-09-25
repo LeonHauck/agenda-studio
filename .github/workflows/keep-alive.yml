@@ -1,0 +1,46 @@
+# Mantém o projeto do Supabase ativo.
+# No plano gratuito, o Supabase pausa projetos sem uso por 7 dias; esta tarefa faz
+# uma consulta simples ao banco uma vez por dia. Se o banco não responder, a tarefa
+# falha e o GitHub envia um e-mail de aviso ao dono do repositório.
+name: Manter Supabase ativo
+
+on:
+  schedule:
+    - cron: '17 11 * * *'   # todo dia às 08:17 (horário de Brasília)
+  workflow_dispatch:         # permite rodar manualmente pela aba Actions
+
+permissions:
+  contents: read
+  actions: write             # para reativar esta própria tarefa (ver último passo)
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Consultar o banco (Supabase)
+        run: |
+          # URL e chave pública lidas do próprio site, sem duplicar configuração
+          URL=$(grep -oP "supabaseUrl:\s*'\K[^']+" js/config.js)
+          KEY=$(grep -oP "supabaseKey:\s*'\K[^']+" js/config.js)
+          for i in 1 2 3; do
+            code=$(curl -s -o resposta.json -w '%{http_code}' \
+              "$URL/rest/v1/settings?select=business_name" -H "apikey: $KEY")
+            if [ "$code" = "200" ]; then
+              echo "Supabase ativo: $(cat resposta.json)"
+              exit 0
+            fi
+            echo "Tentativa $i falhou (HTTP $code): $(cat resposta.json)"
+            sleep 20
+          done
+          echo "::error::O Supabase não respondeu. O projeto pode estar pausado: abra o painel do Supabase e clique em Restore project."
+          exit 1
+
+      # O GitHub desativa tarefas agendadas de repositórios sem commits há 60 dias.
+      # Reativar a cada execução evita que o "cutucão" diário pare sozinho.
+      - name: Manter esta tarefa ativa no GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keep-alive.yml/enable"
