@@ -6,7 +6,7 @@
 let db = null; // { settings, services, clients, appointments }
 const ui = { date: todayKey(), clientQuery: '', finPeriod: 'semana', finAnchor: todayKey() };
 
-const isActive = a => a.status !== 'cancelado';
+const isActive = a => !FREES_SLOT.includes(a.status);
 const isWorkDay = k => db.settings.workDays.includes(parseKey(k).getDay());
 
 /* ---------- Bloqueios ---------- */
@@ -588,10 +588,13 @@ function openServiceForm(svc) {
 /* ============================================================
    Tela: Clientes
    ============================================================ */
+const noShowTag = n => (n ? `<span class="tag tag-noshow">${n} falta${n === 1 ? '' : 's'}</span>` : '');
+
 function clientSummary(c) {
-  const appts = db.appointments.filter(a => a.clientId === c.id && isActive(a));
+  const mine = db.appointments.filter(a => a.clientId === c.id);
+  const appts = mine.filter(isActive);
   const past = appts.filter(a => a.date <= todayKey()).sort((a, b) => b.date.localeCompare(a.date));
-  return { count: appts.length, last: past[0]?.date || null };
+  return { count: appts.length, last: past[0]?.date || null, noShows: mine.filter(a => a.status === 'faltou').length };
 }
 
 function renderClients() {
@@ -624,10 +627,11 @@ function clientListHtml() {
 
   return `<div class="card list">${list.map(c => {
     const { count, last } = clientSummary(c);
+    const { noShows } = clientSummary(c);
     const sub = [c.phone, count ? `${count} ${count === 1 ? 'atendimento' : 'atendimentos'}` : 'Sem atendimentos', last && `última vez ${fmtDateShort(last)}`].filter(Boolean).join(' · ');
     return `<button class="list-item" data-action="open-client" data-id="${c.id}">
       <span class="avatar">${esc(initials(c.name))}</span>
-      <div class="li-body"><div class="li-title"><span>${esc(c.name)}</span></div><div class="li-sub">${esc(sub)}</div></div>
+      <div class="li-body"><div class="li-title"><span>${esc(c.name)}</span>${noShowTag(noShows)}</div><div class="li-sub">${esc(sub)}</div></div>
       <div class="li-side">${icon('chevRight')}</div>
     </button>`;
   }).join('')}</div>`;
@@ -640,7 +644,7 @@ function openClientForm(client) {
     ? db.appointments.filter(a => a.clientId === c.id).sort((a, b) => (b.date + b.start).localeCompare(a.date + a.start))
     : [];
   const done = appts.filter(a => a.status === 'concluido');
-  const { count, last } = isEdit ? clientSummary(c) : { count: 0, last: null };
+  const { count, last, noShows } = isEdit ? clientSummary(c) : { count: 0, last: null, noShows: 0 };
 
   const header = isEdit ? `
     <div class="quick-actions">
@@ -653,6 +657,7 @@ function openClientForm(client) {
       <div><span>Atendimentos</span><strong>${count}</strong></div>
       <div><span>Total pago</span><strong>${money(sum(done, a => a.price))}</strong></div>
       <div><span>Última visita</span><strong>${last ? fmtDateShort(last).slice(0, 5) : '—'}</strong></div>
+      <div class="${noShows ? 'is-warn' : ''}"><span>Faltas</span><strong>${noShows}</strong></div>
     </div>` : '';
 
   const history = isEdit ? `
@@ -773,7 +778,7 @@ function openApptForm(appt, preset = {}) {
   const statusHtml = isEdit ? `
     <div class="field">
       <span class="label">Status</span>
-      <div class="segmented">${Object.entries(STATUS).map(([k, v]) => `
+      <div class="segmented seg-status">${Object.entries(STATUS).map(([k, v]) => `
         <label><input type="radio" name="status" value="${k}" ${a.status === k ? 'checked' : ''}><span>${v.label}</span></label>`).join('')}
       </div>
     </div>` : '';
@@ -790,6 +795,7 @@ function openApptForm(appt, preset = {}) {
         <label for="f-client">Cliente</label>
         <input id="f-client" list="dl-clients" maxlength="80" placeholder="Nome da cliente">
         <datalist id="dl-clients">${db.clients.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
+        <p class="hint warn" id="f-noshow" hidden></p>
       </div>
       <div class="field">
         <label for="f-phone">WhatsApp / telefone</label>
@@ -841,6 +847,15 @@ function openApptForm(appt, preset = {}) {
       const manual = $('#f-manual');
 
       $('#f-client').value = a.clientName;
+      // Mostra quantas faltas a cliente já tem (ajuda a decidir se pede sinal)
+      const showNoShows = () => {
+        const c = findClientByName($('#f-client').value);
+        const n = c ? clientSummary(c).noShows : 0;
+        $('#f-noshow').hidden = !n;
+        $('#f-noshow').textContent = n ? `Atenção: esta cliente tem ${n} falta${n === 1 ? '' : 's'} registrada${n === 1 ? '' : 's'}.` : '';
+      };
+      showNoShows();
+      $('#f-client').addEventListener('input', showNoShows);
       $('#f-phone').value = a.phone || '';
       $('#f-date').value = a.date;
       $('#f-pay').value = a.payment || '';
@@ -996,7 +1011,10 @@ async function offerChangeNotice(before, after) {
   const biz = db.settings.businessName;
   const nome = firstName(after.clientName);
   let title, text;
-  if (after.status === 'cancelado' && before.status !== 'cancelado') {
+  if (after.status === 'faltou' && before.status !== 'faltou') {
+    title = 'Falar com a cliente?';
+    text = `Olá, ${nome}! Sentimos sua falta hoje no ${biz} (horário das ${after.start}). Aconteceu alguma coisa? Se quiser, podemos remarcar.`;
+  } else if (after.status === 'cancelado' && before.status !== 'cancelado') {
     title = 'Avisar sobre o cancelamento?';
     text = `Olá, ${nome}! Seu horário no ${biz} de ${fmtDateLong(before.date)}, às ${before.start}, foi cancelado. Quer remarcar para outro dia?`;
   } else if (isActive(after) && (before.date !== after.date || before.start !== after.start)) {
@@ -1294,7 +1312,9 @@ function renderFinance() {
   const active = inRange.filter(isActive);
   const done = active.filter(a => a.status === 'concluido');
   const pending = active.filter(a => a.status !== 'concluido');
-  const cancelled = inRange.filter(a => !isActive(a));
+  const cancelled = inRange.filter(a => a.status === 'cancelado');
+  const noShows = inRange.filter(a => a.status === 'faltou');
+  const lost = [...cancelled, ...noShows];
   const overdue = pending.filter(a => a.date < tk || (a.date === tk && toMin(a.start) + a.duration <= nowMinutes()));
   const billed = sum(done, a => a.price);
   const isCurrent = tk >= from && tk <= to;
@@ -1322,7 +1342,7 @@ function renderFinance() {
       <div class="stat"><span>Faturado</span><strong>${moneyShort(billed)}</strong><small>${done.length} concluído${done.length === 1 ? '' : 's'}</small></div>
       <div class="stat"><span>A receber</span><strong>${moneyShort(sum(pending, a => a.price))}</strong><small>${pending.length} pendente${pending.length === 1 ? '' : 's'}</small></div>
       <div class="stat"><span>Ticket médio</span><strong>${done.length ? moneyShort(billed / done.length) : '—'}</strong><small>por atendimento</small></div>
-      <div class="stat"><span>Cancelados</span><strong>${cancelled.length}</strong><small>${cancelled.length ? `${moneyShort(sum(cancelled, a => a.price))} perdidos` : 'nenhum'}</small></div>
+      <div class="stat"><span>Faltas · cancelados</span><strong>${noShows.length} · ${cancelled.length}</strong><small>${lost.length ? `${moneyShort(sum(lost, a => a.price))} perdidos` : 'nenhum'}</small></div>
     </section>
 
     ${overdue.length ? `<div class="notice">${icon('alert')}<p><b>${overdue.length} atendimento${overdue.length === 1 ? '' : 's'} já passou e não foi marcado como concluído.</b> Eles aparecem em "A receber" até você mudar o status na agenda.</p></div>` : ''}

@@ -111,6 +111,11 @@ alter table public.settings add column if not exists buffer_minutes int not null
 alter table public.settings drop constraint if exists settings_buffer_check;
 alter table public.settings add constraint settings_buffer_check check (buffer_minutes between 0 and 120);
 
+-- Atualização: status "faltou" (cliente não compareceu). Não ocupa horário nem conta no limite por telefone.
+alter table public.appointments drop constraint if exists appointments_status_check;
+alter table public.appointments add constraint appointments_status_check
+  check (status in ('agendado', 'confirmado', 'concluido', 'cancelado', 'faltou'));
+
 -- Serviços iniciais (só entram se a tabela estiver vazia)
 insert into public.services (name, price, duration, color, sort)
 select * from (values
@@ -213,7 +218,7 @@ language sql stable security definer set search_path = public as $$
   select a.date, a.start_time, a.duration, 'appointment'::text
     from public.appointments a
    where a.date between p_from and p_to
-     and a.status <> 'cancelado'
+     and a.status not in ('cancelado', 'faltou')
      and (p_exclude_token is null or a.manage_token <> p_exclude_token)
      and p_to - p_from <= 62
   union all
@@ -272,7 +277,7 @@ begin
 
   if exists (
     select 1 from public.appointments a
-     where a.date = p_date and a.status <> 'cancelado'
+     where a.date = p_date and a.status not in ('cancelado', 'faltou')
        and (p_exclude is null or a.id <> p_exclude)
        and v_start < public.to_min(a.start_time) + a.duration + s.buffer_minutes
        and v_start + p_duration + s.buffer_minutes > public.to_min(a.start_time)
@@ -335,7 +340,7 @@ begin
 
   if (select count(*) from public.appointments
        where regexp_replace(phone, '\D', '', 'g') = v_phone
-         and status <> 'cancelado' and date >= v_now::date) >= 3 then
+         and status not in ('cancelado', 'faltou') and date >= v_now::date) >= 3 then
     raise exception 'Você já tem 3 horários marcados. Para mais, fale com o estúdio pelo WhatsApp.';
   end if;
 

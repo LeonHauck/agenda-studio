@@ -34,7 +34,10 @@ const STATUS = {
   confirmado: { label: 'Confirmado' },
   concluido: { label: 'Concluído' },
   cancelado: { label: 'Cancelado' },
+  faltou: { label: 'Faltou' },
 };
+// Status que não ocupam horário (cancelado ou cliente não compareceu)
+const FREES_SLOT = ['cancelado', 'faltou'];
 const PAYMENTS = {
   pix: 'Pix',
   dinheiro: 'Dinheiro',
@@ -82,7 +85,7 @@ function computeSlots(settings, appts, date, duration, excludeId = null) {
   const open = toMin(settings.openTime), close = toMin(settings.closeTime), step = settings.slotInterval;
   const buffer = Number(settings.bufferMinutes) || 0;
   const busy = appts
-    .filter(a => a.date === date && a.status !== 'cancelado' && (excludeId == null || a.id !== excludeId))
+    .filter(a => a.date === date && !FREES_SLOT.includes(a.status) && (excludeId == null || a.id !== excludeId))
     .map(a => {
       const extra = a.kind === 'block' ? 0 : buffer;
       return [toMin(a.start), toMin(a.start) + a.duration + extra, extra];

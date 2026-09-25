@@ -257,6 +257,15 @@ a { color: inherit; text-decoration: none; }
 .badge.st-agendado { background: var(--accent-soft); color: var(--accent); }
 .badge.st-confirmado { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
 .badge.st-concluido { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.badge.st-faltou { background: color-mix(in srgb, #c2410c 13%, transparent); color: #c2410c; }
+.appt.st-faltou { opacity: .6; }
+.tag-noshow { background: color-mix(in srgb, #c2410c 13%, transparent); color: #c2410c; }
+.segmented.seg-status { grid-template-columns: repeat(3, 1fr); }
+@media (min-width: 560px) { .segmented.seg-status { grid-template-columns: repeat(5, 1fr); } }
+.mini-stats { grid-template-columns: repeat(2, 1fr) !important; }
+@media (min-width: 560px) { .mini-stats { grid-template-columns: repeat(4, 1fr) !important; } }
+.mini-stats .is-warn { background: color-mix(in srgb, #c2410c 10%, var(--surface-2)); }
+.mini-stats .is-warn strong { color: #c2410c; }
 .badge.st-cancelado { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 
 .gap {

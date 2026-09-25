@@ -34,10 +34,10 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 ### 🔒 Para a dona (painel com login)
 | | Aba | O que faz |
 |---|---|---|
-| 📆 | **Agenda** | Visão semanal, horários livres, encaixes, status e remarcação com aviso por WhatsApp |
+| 📆 | **Agenda** | Visão semanal, horários livres, encaixes, status (inclusive **Faltou**) e remarcação com aviso por WhatsApp |
 | 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias), período do dia ou **toda semana** (ex.: almoço); o motivo fica visível só para a dona |
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
-| 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago e atalho para WhatsApp |
+| 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago, **número de faltas** e atalho para WhatsApp |
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
 | ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, **intervalo de limpeza entre clientes** (padrão 15 min), cor do app, link e backup |
 

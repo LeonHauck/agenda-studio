@@ -317,14 +317,14 @@ function manageBody() {
   }
 
   // Visualização do horário
-  const status = STATUS[b.status]?.label || '';
-  const past = b.date < todayKey() || b.status === 'concluido';
+  const status = b.status === 'faltou' ? '' : STATUS[b.status]?.label || '';
+  const past = b.date < todayKey() || b.status === 'concluido' || b.status === 'faltou';
   let actions;
   if (b.status === 'cancelado') {
     actions = `<p class="pub-sub">Este horário foi cancelado.</p>
       <a class="btn btn-primary btn-block" href="${location.pathname}">Agendar novo horário</a>`;
   } else if (past) {
-    actions = `<p class="pub-sub">Este atendimento já aconteceu. Obrigada pela visita!</p>
+    actions = `<p class="pub-sub">${b.status === 'concluido' ? 'Este atendimento já aconteceu. Obrigada pela visita!' : 'Este horário já passou.'}</p>
       <a class="btn btn-primary btn-block" href="${location.pathname}">Agendar novo horário</a>`;
   } else if (b.canChange && st.confirmCancel) {
     actions = `<div class="confirm-box">
@@ -363,7 +363,7 @@ async function openManage(token) {
   st.token = token;
   const data = await API.getBooking(token);
   st.booking = { ...data, services: data.services || [], price: Number(data.price) };
-  if (['agendado', 'confirmado'].includes(data.status) && data.date >= todayKey()) {
+  if (!FREES_SLOT.includes(data.status) && data.status !== 'concluido' && data.date >= todayKey()) {
     rememberBooking(token, data.date, data.start);
   } else {
     forgetBooking(token);
