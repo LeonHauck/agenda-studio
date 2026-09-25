@@ -123,6 +123,15 @@ git push
 
 ---
 
+## 🔧 Manutenção automática
+
+A tarefa [**Manter Supabase ativo**](.github/workflows/keep-alive.yml) (GitHub Actions) consulta o banco **uma vez por dia**, porque o plano gratuito do Supabase pausa projetos sem uso por 7 dias.
+
+- ✅ Se o banco não responder, a tarefa falha e o GitHub **envia um e-mail de aviso**.
+- ▶️ Para rodar manualmente: aba **Actions → Manter Supabase ativo → Run workflow**.
+
+---
+
 ## 🛣️ Próximas ideias
 - [x] 🚫 Bloqueio de datas e horários (folgas, feriados, férias)
 - [x] 🍽️ Bloqueios recorrentes (ex.: almoço todos os dias)
