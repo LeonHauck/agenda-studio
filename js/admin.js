@@ -1037,7 +1037,8 @@ function reminderText(a) {
   const tomorrow = a.date === dateKey(addDays(new Date(), 1));
   const when = tomorrow ? `amanhã (${fmtDateLong(a.date)})` : fmtDateLong(a.date);
   const names = a.services.map(x => x.name).join(' + ');
-  return `Olá, ${firstName(a.clientName)}! 💅 Passando para lembrar do seu horário no ${db.settings.businessName}: ` +
+  // Sem emojis: alguns aparelhos mostram "?" no lugar deles em mensagens abertas por link
+  return `Olá, ${firstName(a.clientName)}! Passando para lembrar do seu horário no ${db.settings.businessName}: ` +
     `${when}, às ${a.start} (${names}).
 
 Te espero!${manageLine(a)}`;
