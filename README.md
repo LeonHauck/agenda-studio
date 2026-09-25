@@ -128,7 +128,6 @@ git push
 - [ ] 🍽️ Bloqueios recorrentes (ex.: almoço todos os dias)
 - [x] ⏰ Lembretes com mensagem pronta no WhatsApp
 - [x] 🔁 Link para a cliente remarcar ou cancelar sozinha
-- [ ] 🤖 Envio 100% automático dos lembretes (API do WhatsApp, serviço pago)
 - [x] 🔑 Recuperação de senha por e-mail
 
 ---
