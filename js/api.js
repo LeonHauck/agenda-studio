@@ -103,10 +103,12 @@ const API = (() => {
   const blockFrom = r => ({
     id: r.id, startDate: r.start_date, endDate: r.end_date,
     startTime: r.start_time || '', endTime: r.end_time || '', reason: r.reason || '',
+    weekdays: Array.isArray(r.weekdays) && r.weekdays.length ? r.weekdays.map(Number) : null,
   });
   const blockTo = b => withId(b, {
     start_date: b.startDate, end_date: b.endDate,
     start_time: b.startTime || null, end_time: b.endTime || null, reason: b.reason || '',
+    weekdays: b.weekdays && b.weekdays.length ? b.weekdays : null,
   });
   function withId(src, row) {
     if (src.id) row.id = src.id;

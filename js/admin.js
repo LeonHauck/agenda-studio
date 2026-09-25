@@ -10,7 +10,11 @@ const isActive = a => a.status !== 'cancelado';
 const isWorkDay = k => db.settings.workDays.includes(parseKey(k).getDay());
 
 /* ---------- Bloqueios ---------- */
-const blocksOn = k => db.blocks.filter(b => k >= b.startDate && k <= b.endDate);
+const NO_END = '2099-12-31'; // "sem data final" nos bloqueios recorrentes
+const isRecurring = b => Array.isArray(b.weekdays) && b.weekdays.length > 0;
+const blockApplies = (b, k) => k >= b.startDate && k <= b.endDate &&
+  (!isRecurring(b) || b.weekdays.includes(parseKey(k).getDay()));
+const blocksOn = k => db.blocks.filter(b => blockApplies(b, k));
 const fullDayBlock = k => blocksOn(k).find(b => !b.startTime);
 const blockMinutes = b => (b.startTime ? [toMin(b.startTime), toMin(b.endTime)] : [0, 1440]);
 // Bloqueios no mesmo formato de agendamento, para o cálculo de horários livres
@@ -24,11 +28,24 @@ function findBlock(date, start, duration) {
     return start < e && start + duration > s;
   });
 }
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // segunda a domingo
+function weekdaysLabel(days) {
+  const key = [...days].sort().join(',');
+  if (key === '0,1,2,3,4,5,6') return 'todos os dias';
+  if (key === '1,2,3,4,5') return 'seg a sex';
+  if (key === '1,2,3,4,5,6') return 'seg a sáb';
+  return WEEK_ORDER.filter(d => days.includes(d)).map(d => DOW_SHORT[d].toLowerCase()).join(', ');
+}
 function blockLabel(b) {
-  const dates = b.startDate === b.endDate
-    ? fmtDateShort(b.startDate).slice(0, 5)
-    : `${fmtDateShort(b.startDate).slice(0, 5)} a ${fmtDateShort(b.endDate).slice(0, 5)}`;
-  return `${dates} · ${b.startTime ? `${b.startTime} – ${b.endTime}` : 'dia inteiro'}`;
+  const d = k => fmtDateShort(k).slice(0, 5);
+  const time = b.startTime ? `${b.startTime} – ${b.endTime}` : 'dia inteiro';
+  if (isRecurring(b)) {
+    const days = weekdaysLabel(b.weekdays);
+    const range = b.endDate >= NO_END ? `desde ${d(b.startDate)}` : `de ${d(b.startDate)} a ${d(b.endDate)}`;
+    return `🔁 ${days.charAt(0).toUpperCase() + days.slice(1)} · ${time} · ${range}`;
+  }
+  const dates = b.startDate === b.endDate ? d(b.startDate) : `${d(b.startDate)} a ${d(b.endDate)}`;
+  return `${dates} · ${time}`;
 }
 
 const availableSlots = (date, duration, excludeId) =>
@@ -400,7 +417,8 @@ function timelineHtml(k, appts) {
 }
 
 function blockBanner(b) {
-  const range = b.startDate === b.endDate ? '' : ` · de ${fmtDateShort(b.startDate).slice(0, 5)} a ${fmtDateShort(b.endDate).slice(0, 5)}`;
+  const range = isRecurring(b) ? ` · 🔁 toda semana (${weekdaysLabel(b.weekdays)})`
+    : b.startDate === b.endDate ? '' : ` · de ${fmtDateShort(b.startDate).slice(0, 5)} a ${fmtDateShort(b.endDate).slice(0, 5)}`;
   return `<button class="block-banner" data-action="edit-block" data-id="${b.id}">
     ${icon('lock')}
     <div><b>Dia bloqueado</b><span>${esc(b.reason || 'Sem motivo informado')}${range}</span></div>
@@ -414,7 +432,7 @@ function blockCard(b) {
     ${icon('lock')}
     <div class="appt-body">
       <div class="appt-title"><span>Bloqueado</span></div>
-      <div class="appt-sub">${esc(b.reason || 'Sem motivo informado')}</div>
+      <div class="appt-sub">${esc(b.reason || 'Sem motivo informado')}${isRecurring(b) ? ' · 🔁 toda semana' : ''}</div>
     </div>
   </button>`;
 }
@@ -1078,13 +1096,14 @@ function openReminders() {
 function openBlockForm(block, preset = {}) {
   const isEdit = !!block;
   const b = block ? { ...block } : {
-    startDate: preset.date || ui.date, endDate: preset.date || ui.date, startTime: '', endTime: '', reason: '',
+    startDate: preset.date || ui.date, endDate: preset.date || ui.date, startTime: '', endTime: '', reason: '', weekdays: null,
   };
+  const recurring = isRecurring(b);
 
   openSheet({
-    title: isEdit ? 'Editar bloqueio' : 'Bloquear agenda',
+    title: isEdit ? (recurring ? 'Editar bloqueio recorrente' : 'Editar bloqueio') : 'Bloquear agenda',
     body: `<form id="blk-form" class="form" autocomplete="off" novalidate>
-      <p class="notice-soft">${icon('lock')} As clientes não conseguem agendar no período bloqueado. O motivo fica visível só para você.</p>
+      <p class="notice-soft">${icon('lock')}<span>As clientes não conseguem agendar no período bloqueado. O motivo fica visível só para você.${recurring ? ' <b>As alterações valem para todos os dias da repetição.</b>' : ''}</span></p>
       <div class="field">
         <span class="label">O que bloquear</span>
         <div class="segmented seg-2">
@@ -1092,18 +1111,32 @@ function openBlockForm(block, preset = {}) {
           <label><input type="radio" name="kind" value="period"><span>Período do dia</span></label>
         </div>
       </div>
-      <div class="row">
-        <div class="field"><label for="b-from">De</label><input id="b-from" type="date"></div>
-        <div class="field"><label for="b-to">Até</label><input id="b-to" type="date"></div>
-      </div>
-      <p class="hint">Para um único dia, deixe as duas datas iguais. Para férias, escolha o período todo.</p>
       <div class="row" id="b-times">
         <div class="field"><label for="b-start">Das</label><input id="b-start" type="time" step="300"></div>
         <div class="field"><label for="b-end">Às</label><input id="b-end" type="time" step="300"></div>
       </div>
       <div class="field">
+        <span class="label">Repetir</span>
+        <div class="segmented seg-2">
+          <label><input type="radio" name="repeat" value="no"><span>Não repete</span></label>
+          <label><input type="radio" name="repeat" value="weekly"><span>Toda semana</span></label>
+        </div>
+      </div>
+      <div class="field" id="b-days-wrap">
+        <div class="label-row"><span class="label">Nos dias</span><button type="button" class="link-btn" id="b-workdays">Dias de atendimento</button></div>
+        <div class="daypills">${WEEK_ORDER.map(d => `
+          <label><input type="checkbox" name="wd" value="${d}"><span>${DOW_SHORT[d]}</span></label>`).join('')}
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="b-from" id="b-from-label">De</label><input id="b-from" type="date"></div>
+        <div class="field"><label for="b-to">Até</label><input id="b-to" type="date"></div>
+      </div>
+      <label class="check-row" id="b-noend-wrap"><input type="checkbox" id="b-noend"> Sem data final</label>
+      <p class="hint" id="b-hint"></p>
+      <div class="field">
         <label for="b-reason">Motivo <span class="muted">(opcional)</span></label>
-        <input id="b-reason" maxlength="80" placeholder="Ex.: folga, feriado, consulta médica">
+        <input id="b-reason" maxlength="80" placeholder="Ex.: almoço, folga, feriado, consulta médica">
       </div>
       <div id="b-conflicts"></div>
     </form>`,
@@ -1113,23 +1146,46 @@ function openBlockForm(block, preset = {}) {
       <button type="submit" form="blk-form" class="btn btn-primary">${isEdit ? 'Salvar' : 'Bloquear'}</button>`,
     onMount() {
       const f = $('#blk-form');
-      const from = $('#b-from'), to = $('#b-to'), start = $('#b-start'), end = $('#b-end');
+      const from = $('#b-from'), to = $('#b-to'), start = $('#b-start'), end = $('#b-end'), noEnd = $('#b-noend');
       from.value = b.startDate;
-      to.value = b.endDate;
+      to.value = b.endDate >= NO_END ? '' : b.endDate;
+      noEnd.checked = recurring && b.endDate >= NO_END;
       start.value = b.startTime || '12:00';
       end.value = b.endTime || '13:00';
       $('#b-reason').value = b.reason || '';
       $(`input[name=kind][value=${b.startTime ? 'period' : 'day'}]`, f).checked = true;
+      $(`input[name=repeat][value=${recurring ? 'weekly' : 'no'}]`, f).checked = true;
+      const initialDays = recurring ? b.weekdays : db.settings.workDays;
+      $$('input[name=wd]', f).forEach(i => { i.checked = initialDays.includes(Number(i.value)); });
 
       const kind = () => $('input[name=kind]:checked', f).value;
+      const weekly = () => $('input[name=repeat]:checked', f).value === 'weekly';
+      const days = () => $$('input[name=wd]:checked', f).map(i => Number(i.value));
+      const endValue = () => (weekly() && noEnd.checked ? NO_END : to.value);
 
-      // Mostra os agendamentos que já existem dentro do período escolhido
+      $('#b-workdays').addEventListener('click', () => {
+        $$('input[name=wd]', f).forEach(i => { i.checked = db.settings.workDays.includes(Number(i.value)); });
+        refresh();
+      });
+
+      // Ajusta os campos ao tipo de bloqueio e mostra agendamentos que já existem no período
       function refresh() {
+        const isWeekly = weekly();
         $('#b-times').hidden = kind() !== 'period';
-        if (from.value && (!to.value || to.value < from.value)) to.value = from.value;
+        $('#b-days-wrap').hidden = !isWeekly;
+        $('#b-noend-wrap').hidden = !isWeekly;
+        $('#b-from-label').textContent = isWeekly ? 'A partir de' : 'De';
+        to.disabled = isWeekly && noEnd.checked;
+        if (!to.disabled && from.value && (!to.value || to.value < from.value)) to.value = from.value;
+        $('#b-hint').textContent = isWeekly
+          ? 'Ex.: almoço de segunda a sábado, das 12:00 às 13:00, sem data final.'
+          : 'Para um único dia, deixe as duas datas iguais. Para férias, escolha o período todo.';
+
         const period = kind() === 'period' && start.value && end.value ? [toMin(start.value), toMin(end.value)] : [0, 1440];
+        const last = endValue();
         const hits = db.appointments
-          .filter(a => isActive(a) && a.date >= from.value && a.date <= to.value)
+          .filter(a => isActive(a) && a.date >= from.value && a.date <= last && a.date >= todayKey())
+          .filter(a => !isWeekly || days().includes(parseKey(a.date).getDay()))
           .filter(a => toMin(a.start) < period[1] && toMin(a.start) + a.duration > period[0])
           .sort((x, y) => (x.date + x.start).localeCompare(y.date + y.start));
         $('#b-conflicts').innerHTML = hits.length ? `<div class="notice">${icon('alert')}<p>
@@ -1144,15 +1200,19 @@ function openBlockForm(block, preset = {}) {
       f.addEventListener('submit', async e => {
         e.preventDefault();
         const isPeriod = kind() === 'period';
-        if (!from.value || !to.value) return toast('Escolha as datas.');
-        if (to.value < from.value) return toast('A data final deve ser depois da inicial.');
+        const isWeekly = weekly();
+        const last = endValue();
+        if (!from.value || !last) return toast(isWeekly ? 'Escolha a data final ou marque "Sem data final".' : 'Escolha as datas.');
+        if (last < from.value) return toast('A data final deve ser depois da inicial.');
         if (isPeriod && (!start.value || !end.value || start.value >= end.value)) return toast('O horário final deve ser depois do inicial.');
+        if (isWeekly && !days().length) return toast('Escolha pelo menos um dia da semana.');
         const record = {
           ...b,
           startDate: from.value,
-          endDate: to.value,
+          endDate: last,
           startTime: isPeriod ? start.value : '',
           endTime: isPeriod ? end.value : '',
+          weekdays: isWeekly ? days() : null,
           reason: $('#b-reason').value.trim(),
         };
         await withBusy($('.sheet-foot [type=submit]'), async () => {
@@ -1164,7 +1224,7 @@ function openBlockForm(block, preset = {}) {
       });
 
       $('#b-del')?.addEventListener('click', async e => {
-        const ok = await confirmDialog('O período volta a ficar disponível para agendamentos.', { title: 'Remover bloqueio?', ok: 'Remover', danger: true });
+        const ok = await confirmDialog(recurring ? 'Todos os dias desta repetição voltam a ficar disponíveis para agendamentos.' : 'O período volta a ficar disponível para agendamentos.', { title: 'Remover bloqueio?', ok: 'Remover', danger: true });
         if (!ok) return;
         await withBusy(e.currentTarget, async () => {
           await API.deleteBlock(b.id);

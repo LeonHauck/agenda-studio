@@ -84,6 +84,13 @@ create table if not exists public.blocks (
 );
 create index if not exists blocks_dates_idx on public.blocks (start_date, end_date);
 
+-- Atualização: bloqueios recorrentes. weekdays = dias da semana em que o bloqueio vale
+-- (0 = domingo … 6 = sábado); nulo = todos os dias do período. "Sem data final" = 2099-12-31.
+alter table public.blocks add column if not exists weekdays int[];
+alter table public.blocks drop constraint if exists blocks_weekdays_check;
+alter table public.blocks add constraint blocks_weekdays_check
+  check (weekdays is null or (cardinality(weekdays) between 1 and 7 and weekdays <@ array[0, 1, 2, 3, 4, 5, 6]));
+
 -- Atualização: link para a cliente remarcar/cancelar e controle de lembretes
 alter table public.appointments add column if not exists manage_token uuid not null default gen_random_uuid();
 alter table public.appointments add column if not exists client_action text;
@@ -211,6 +218,7 @@ language sql stable security definer set search_path = public as $$
     from public.blocks b
    cross join generate_series(greatest(b.start_date, p_from), least(b.end_date, p_to), interval '1 day') as d
    where b.end_date >= p_from and b.start_date <= p_to
+     and (b.weekdays is null or extract(dow from d)::int = any (b.weekdays))
      and p_to - p_from <= 62
 $$;
 
@@ -239,6 +247,7 @@ begin
   if exists (
     select 1 from public.blocks b
      where p_date between b.start_date and b.end_date
+       and (b.weekdays is null or extract(dow from p_date)::int = any (b.weekdays))
        and (b.start_time is null
             or (v_start < public.to_min(b.end_time) and v_start + p_duration > public.to_min(b.start_time)))
   ) then

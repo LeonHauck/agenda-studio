@@ -35,7 +35,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | | Aba | O que faz |
 |---|---|---|
 | 📆 | **Agenda** | Visão semanal, horários livres, encaixes, status e remarcação com aviso por WhatsApp |
-| 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias) ou período do dia; o motivo fica visível só para a dona |
+| 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias), período do dia ou **toda semana** (ex.: almoço); o motivo fica visível só para a dona |
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
 | 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago e atalho para WhatsApp |
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
@@ -125,7 +125,7 @@ git push
 
 ## 🛣️ Próximas ideias
 - [x] 🚫 Bloqueio de datas e horários (folgas, feriados, férias)
-- [ ] 🍽️ Bloqueios recorrentes (ex.: almoço todos os dias)
+- [x] 🍽️ Bloqueios recorrentes (ex.: almoço todos os dias)
 - [x] ⏰ Lembretes com mensagem pronta no WhatsApp
 - [x] 🔁 Link para a cliente remarcar ou cancelar sozinha
 - [x] 🔑 Recuperação de senha por e-mail
