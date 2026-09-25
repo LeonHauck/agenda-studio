@@ -72,20 +72,26 @@ function waLink(phone, text) {
 }
 
 /**
- * Horários livres (em minutos) para uma data, considerando o expediente e os
- * agendamentos existentes. `appts` aceita agendamentos completos ou apenas
- * { date, start, duration } (horários ocupados vindos da página pública).
+ * Horários livres (em minutos) para uma data, considerando o expediente, os
+ * agendamentos e os bloqueios. `appts` aceita agendamentos completos ou apenas
+ * { date, start, duration, kind } (horários ocupados vindos da página pública).
+ * O intervalo de limpeza (settings.bufferMinutes) é reservado entre atendimentos;
+ * não é somado antes de bloqueios nem do horário de fechamento.
  */
 function computeSlots(settings, appts, date, duration, excludeId = null) {
   const open = toMin(settings.openTime), close = toMin(settings.closeTime), step = settings.slotInterval;
+  const buffer = Number(settings.bufferMinutes) || 0;
   const busy = appts
     .filter(a => a.date === date && a.status !== 'cancelado' && (excludeId == null || a.id !== excludeId))
-    .map(a => [toMin(a.start), toMin(a.start) + a.duration]);
+    .map(a => {
+      const extra = a.kind === 'block' ? 0 : buffer;
+      return [toMin(a.start), toMin(a.start) + a.duration + extra, extra];
+    });
   const minStart = date === todayKey() ? nowMinutes() : -1;
   const slots = [];
   for (let t = open; t + duration <= close; t += step) {
     if (t < minStart) continue;
-    if (busy.some(([b, e]) => t < e && t + duration > b)) continue;
+    if (busy.some(([b, e, extra]) => t < e && t + duration + extra > b)) continue;
     slots.push(t);
   }
   return slots;

@@ -20,7 +20,7 @@ const blockMinutes = b => (b.startTime ? [toMin(b.startTime), toMin(b.endTime)] 
 // Bloqueios no mesmo formato de agendamento, para o cálculo de horários livres
 const blockBusy = k => blocksOn(k).map(b => {
   const [s, e] = blockMinutes(b);
-  return { date: k, start: fromMin(s), duration: e - s };
+  return { date: k, start: fromMin(s), duration: e - s, kind: 'block' };
 });
 function findBlock(date, start, duration) {
   return blocksOn(date).find(b => {
@@ -67,10 +67,14 @@ function dayAppointments(k) {
     .sort((a, b) => toMin(a.start) - toMin(b.start));
 }
 
+const bufferMin = () => Number(db.settings.bufferMinutes) || 0;
+
+// Agendamento que ocupa o horário, contando o intervalo de limpeza entre atendimentos
 function findConflict(date, start, duration, excludeId) {
+  const buf = bufferMin();
   return db.appointments.find(a =>
     a.date === date && a.id !== excludeId && isActive(a) &&
-    start < toMin(a.start) + a.duration && start + duration > toMin(a.start));
+    start < toMin(a.start) + a.duration + buf && start + duration + buf > toMin(a.start));
 }
 
 /** Substitui (ou adiciona) um item numa lista do estado local, pelo id. */
@@ -359,7 +363,7 @@ function renderAgenda() {
     </section>
 
     <section>
-      <div class="section-head"><h2>${esc(fmtDateLong(ui.date))}</h2></div>
+      <div class="section-head"><h2>${esc(fmtDateLong(ui.date))}</h2>${bufferMin() ? `<span class="muted small">${icon('clock')} ${bufferMin()} min de intervalo entre clientes</span>` : ''}</div>
       ${timelineHtml(ui.date, appts)}
     </section>
   </div>`;
@@ -399,15 +403,17 @@ function timelineHtml(k, appts) {
     </button>` });
   };
 
-  // Períodos ocupados: agendamentos ativos + bloqueios parciais
+  // Períodos ocupados: agendamentos ativos (com o intervalo depois) + bloqueios parciais.
+  // Antes de um agendamento, o tempo livre também desconta o intervalo de limpeza.
+  const buf = bufferMin();
   const busy = [
-    ...appts.filter(isActive).map(a => [toMin(a.start), toMin(a.start) + a.duration]),
-    ...partial.map(blockMinutes),
+    ...appts.filter(isActive).map(a => [toMin(a.start), toMin(a.start) + a.duration + buf, buf]),
+    ...partial.map(b => [...blockMinutes(b), 0]),
   ].sort((x, y) => x[0] - y[0]);
 
   let cursor = toMin(s.openTime);
-  for (const [start, end] of busy) {
-    pushGap(cursor, start);
+  for (const [start, end, before] of busy) {
+    pushGap(cursor, start - before);
     cursor = Math.max(cursor, end);
   }
   pushGap(cursor, toMin(s.closeTime));
@@ -920,7 +926,7 @@ function openApptForm(appt, preset = {}) {
         const conflict = findConflict(date, toMin(start), duration, a.id);
         if (conflict) {
           const ok = await confirmDialog(
-            `Esse horário coincide com ${conflict.clientName} (${conflict.start} – ${fromMin(toMin(conflict.start) + conflict.duration)}).`,
+            `Esse horário coincide com ${conflict.clientName} (${conflict.start} – ${fromMin(toMin(conflict.start) + conflict.duration)}${bufferMin() ? `, mais ${bufferMin()} min de intervalo` : ''}).`,
             { title: 'Horário ocupado', ok: 'Agendar mesmo assim' });
           if (!ok) return;
         }
@@ -1521,6 +1527,14 @@ function renderSettings() {
           </div>
           <small class="muted small">Os horários oferecidos começam a cada ${fmtDuration(s.slotInterval)} a partir da abertura (${s.openTime}, ${fromMin(toMin(s.openTime) + s.slotInterval)}, ${fromMin(toMin(s.openTime) + 2 * s.slotInterval)}…).</small>
         </div>
+        <div class="field">
+          <label for="set-buffer">Intervalo entre atendimentos (minutos)</label>
+          <input id="set-buffer" type="number" inputmode="numeric" min="0" max="120" step="5" data-setting="bufferMinutes" value="${s.bufferMinutes || 0}">
+          <div class="quick" style="margin-top:4px">${[0, 5, 10, 15, 20, 30].map(m => `
+            <button type="button" class="${(s.bufferMinutes || 0) === m ? 'on' : ''}" data-action="set-buffer" data-min="${m}">${m ? `${m} min` : 'Sem intervalo'}</button>`).join('')}
+          </div>
+          <small class="muted small">Tempo reservado depois de cada cliente para limpeza e esterilização. ${s.bufferMinutes ? `Ex.: atendimento das 10:00 às 11:00 → próximo horário a partir das ${fromMin(660 + Number(s.bufferMinutes))}.` : 'Sem intervalo, o próximo horário começa logo que o anterior termina.'}</small>
+        </div>
       </div>
     </section>
 
@@ -1590,6 +1604,13 @@ async function onSettingChange(el) {
   const s = db.settings;
   if (key === 'workDays') {
     s.workDays = $$('[data-setting=workDays]:checked').map(i => Number(i.value)).sort();
+  } else if (key === 'bufferMinutes') {
+    const min = Math.round(Number(el.value) / 5) * 5;
+    if (el.value === '' || min < 0 || min > 120) {
+      el.value = s.bufferMinutes || 0;
+      return toast('O intervalo deve ficar entre 0 e 120 minutos.');
+    }
+    s.bufferMinutes = min;
   } else if (key === 'changeNoticeHours') {
     s.changeNoticeHours = Number(el.value);
   } else if (key === 'slotInterval') {
@@ -1724,6 +1745,11 @@ const ACTIONS = {
     } catch {
       window.prompt('Copie o link:', manageUrl(a));
     }
+  },
+  'set-buffer': el => {
+    const input = $('#set-buffer');
+    input.value = el.dataset.min;
+    onSettingChange(input);
   },
   'set-interval': el => {
     const input = $('#set-step');

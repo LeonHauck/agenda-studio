@@ -106,6 +106,11 @@ alter table public.settings add column if not exists change_notice_hours int not
 alter table public.settings drop constraint if exists settings_change_notice_check;
 alter table public.settings add constraint settings_change_notice_check check (change_notice_hours between -1 and 168);
 
+-- Atualização: intervalo (minutos) reservado depois de cada atendimento, para limpeza/esterilização
+alter table public.settings add column if not exists buffer_minutes int not null default 15;
+alter table public.settings drop constraint if exists settings_buffer_check;
+alter table public.settings add constraint settings_buffer_check check (buffer_minutes between 0 and 120);
+
 -- Serviços iniciais (só entram se a tabela estiver vazia)
 insert into public.services (name, price, duration, color, sort)
 select * from (values
@@ -201,10 +206,11 @@ grant execute on function public.to_min(text) to anon, authenticated;
 -- Dia inteiro bloqueado aparece como 00:00 com 1440 minutos.
 -- p_exclude_token: ao remarcar, o horário atual da própria cliente não conta como ocupado.
 drop function if exists public.busy_slots(date, date);
+drop function if exists public.busy_slots(date, date, uuid);
 create or replace function public.busy_slots(p_from date, p_to date, p_exclude_token uuid default null)
-returns table (day date, start_time text, duration int)
+returns table (day date, start_time text, duration int, kind text)
 language sql stable security definer set search_path = public as $$
-  select a.date, a.start_time, a.duration
+  select a.date, a.start_time, a.duration, 'appointment'::text
     from public.appointments a
    where a.date between p_from and p_to
      and a.status <> 'cancelado'
@@ -214,7 +220,8 @@ language sql stable security definer set search_path = public as $$
   select d::date,
          coalesce(b.start_time, '00:00'),
          case when b.start_time is null then 1440
-              else public.to_min(b.end_time) - public.to_min(b.start_time) end
+              else public.to_min(b.end_time) - public.to_min(b.start_time) end,
+         'block'::text
     from public.blocks b
    cross join generate_series(greatest(b.start_date, p_from), least(b.end_date, p_to), interval '1 day') as d
    where b.end_date >= p_from and b.start_date <= p_to
@@ -267,8 +274,8 @@ begin
     select 1 from public.appointments a
      where a.date = p_date and a.status <> 'cancelado'
        and (p_exclude is null or a.id <> p_exclude)
-       and v_start < public.to_min(a.start_time) + a.duration
-       and v_start + p_duration > public.to_min(a.start_time)
+       and v_start < public.to_min(a.start_time) + a.duration + s.buffer_minutes
+       and v_start + p_duration + s.buffer_minutes > public.to_min(a.start_time)
   ) then
     raise exception 'Esse horário acabou de ser ocupado. Escolha outro.';
   end if;

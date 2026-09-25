@@ -47,6 +47,7 @@ const API = (() => {
     slotInterval: Number(r.slot_interval) || 15,
     accent: r.accent,
     changeNoticeHours: r.change_notice_hours ?? 2,
+    bufferMinutes: r.buffer_minutes ?? 0,
   });
   const settingsTo = s => ({
     business_name: s.businessName,
@@ -57,6 +58,7 @@ const API = (() => {
     slot_interval: s.slotInterval,
     accent: s.accent,
     change_notice_hours: s.changeNoticeHours ?? 2,
+    buffer_minutes: s.bufferMinutes ?? 0,
   });
   const serviceFrom = r => ({
     id: r.id, name: r.name, price: Number(r.price), duration: r.duration, color: r.color, active: r.active, sort: r.sort,
@@ -231,7 +233,7 @@ const API = (() => {
     async busySlots(from, to, excludeToken = null) {
       const { data, error } = await sb.rpc('busy_slots', { p_from: from, p_to: to, p_exclude_token: excludeToken });
       check(error);
-      return data.map(r => ({ date: r.day, start: r.start_time, duration: r.duration }));
+      return data.map(r => ({ date: r.day, start: r.start_time, duration: r.duration, kind: r.kind || 'appointment' }));
     },
     async book({ name, phone, serviceIds, date, start, notes }) {
       const { data, error } = await sb.rpc('book_appointment', {

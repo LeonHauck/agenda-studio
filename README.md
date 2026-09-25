@@ -39,7 +39,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
 | 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago e atalho para WhatsApp |
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
-| ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, cor do app, link e backup |
+| ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, **intervalo de limpeza entre clientes** (padrão 15 min), cor do app, link e backup |
 
 - 🔔 Atualização em **tempo real** quando uma cliente agenda, remarca ou cancela
 - ⏰ **Lembretes** do próximo dia com mensagem pronta no WhatsApp, incluindo o link de remarcação
