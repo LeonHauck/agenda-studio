@@ -6,6 +6,11 @@
    ============================================================ */
 const API = (() => {
   const cfg = window.AGENDA_CONFIG || {};
+  // O link de recuperação de senha chega no endereço (#...&type=recovery). É lido antes de
+  // criar o cliente do Supabase, que processa e limpa esses dados da URL.
+  const urlHash = new URLSearchParams(location.hash.slice(1));
+  const recoveryLink = urlHash.get('type') === 'recovery';
+  const linkError = urlHash.get('error_code') || urlHash.get('error') || '';
   const configured = Boolean(cfg.supabaseUrl && cfg.supabaseKey &&
     !cfg.supabaseUrl.includes('SEU-PROJETO') && !cfg.supabaseKey.includes('SUA-CHAVE'));
   const sb = configured && window.supabase ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey) : null;
@@ -17,6 +22,12 @@ const API = (() => {
     if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sem conexão com a internet. Tente novamente.';
     if (/JWT|permission denied|row-level security/i.test(m)) return 'Sem permissão. Entre novamente.';
     if (/invalid input syntax for type uuid/i.test(m)) return 'Link inválido. Confira o endereço recebido.';
+    if (/should be different from the old password/i.test(m)) return 'A nova senha precisa ser diferente da anterior.';
+    if (/Password should be at least|weak.?password/i.test(m)) return 'Senha muito fraca. Use pelo menos 8 caracteres, misturando letras e números.';
+    if (/you can only request this after/i.test(m)) return 'Aguarde alguns segundos antes de pedir outro e-mail.';
+    if (/rate limit/i.test(m)) return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.';
+    if (/Error sending recovery email|sending.*email/i.test(m)) return 'Não foi possível enviar o e-mail. A configuração de e-mail do Supabase precisa ser revisada.';
+    if (/Auth session missing|session.*expired/i.test(m)) return 'O link expirou. Peça um novo e-mail de recuperação.';
     return m;
   }
   function check(error) {
@@ -140,6 +151,17 @@ const API = (() => {
     },
     async signOut() {
       await sb.auth.signOut();
+    },
+    recoveryLink,
+    linkError,
+    /** Envia o e-mail com o link para criar uma nova senha (volta para esta mesma página). */
+    async sendPasswordReset(email) {
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: new URL('./', location.href).href });
+      check(error);
+    },
+    async updatePassword(password) {
+      const { error } = await sb.auth.updateUser({ password });
+      check(error);
     },
     async isAdmin(userId) {
       const { data, error } = await sb.from('admins').select('user_id').eq('user_id', userId).maybeSingle();

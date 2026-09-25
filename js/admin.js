@@ -80,19 +80,23 @@ function showSetupNeeded() {
     <p class="muted">Preencha a URL e a chave pública do projeto no arquivo <b>js/config.js</b> e recarregue a página.</p>`);
 }
 
-function showLogin(message = '') {
+function showLogin(message = '', email = '') {
   showAuth(`
     <span class="brand-mark">${icon('lock')}</span>
     <h1>Área da administração</h1>
     <p class="muted">Entre com seu e-mail e senha para acessar a agenda.</p>
     <form id="login-form" class="form">
       <div class="field"><label for="l-email">E-mail</label><input id="l-email" type="email" autocomplete="username" required></div>
-      <div class="field"><label for="l-pass">Senha</label><input id="l-pass" type="password" autocomplete="current-password" required></div>
+      <div class="field">
+        <div class="label-row"><label for="l-pass">Senha</label><button type="button" class="link-btn" data-action="forgot-password">Esqueci minha senha</button></div>
+        <input id="l-pass" type="password" autocomplete="current-password" required>
+      </div>
       ${message ? `<p class="hint warn" style="margin:0">${esc(message)}</p>` : ''}
       <button class="btn btn-primary btn-block" type="submit">Entrar</button>
     </form>
     <a class="auth-link" href="../">Ir para a página de agendamento das clientes</a>`);
 
+  $('#l-email').value = email;
   $('#login-form').addEventListener('submit', async e => {
     e.preventDefault();
     const email = $('#l-email').value.trim();
@@ -102,7 +106,86 @@ function showLogin(message = '') {
       await enter(session);
     });
   });
-  $('#l-email').focus();
+  $(email ? '#l-pass' : '#l-email').focus();
+}
+
+/* ---------- Recuperação de senha ---------- */
+function showForgotPassword(email = '') {
+  showAuth(`
+    <span class="brand-mark">${icon('mail')}</span>
+    <h1>Esqueceu a senha?</h1>
+    <p class="muted">Informe o e-mail de acesso. Vamos enviar um link para você criar uma nova senha.</p>
+    <form id="forgot-form" class="form">
+      <div class="field"><label for="fp-email">E-mail</label><input id="fp-email" type="email" autocomplete="username" required></div>
+      <button class="btn btn-primary btn-block" type="submit">Enviar link</button>
+    </form>
+    <button type="button" class="auth-link link-plain" data-action="back-to-login">Voltar para o login</button>`);
+
+  $('#fp-email').value = email;
+  $('#fp-email').focus();
+  $('#forgot-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const address = $('#fp-email').value.trim();
+    if (!address) return toast('Informe o e-mail.');
+    await withBusy($('#forgot-form [type=submit]'), async () => {
+      await API.sendPasswordReset(address);
+      showResetSent(address);
+    });
+  });
+}
+
+function showResetSent(email) {
+  showAuth(`
+    <span class="brand-mark">${icon('mail')}</span>
+    <h1>Verifique seu e-mail</h1>
+    <p class="muted">Se <b>${esc(email)}</b> estiver cadastrado, você vai receber em instantes um link para criar uma nova senha.</p>
+    <ul class="auth-tips">
+      <li>O link vale por <b>1 hora</b> e só pode ser usado uma vez.</li>
+      <li>Não chegou? Confira a caixa de <b>spam</b> ou <b>promoções</b>.</li>
+    </ul>
+    <button type="button" class="btn btn-ghost btn-block" data-action="back-to-login" data-email="${esc(email)}">Voltar para o login</button>
+    <button type="button" class="auth-link link-plain" data-action="forgot-password" data-email="${esc(email)}">Enviar de novo</button>`);
+}
+
+function showNewPassword(session) {
+  showAuth(`
+    <span class="brand-mark">${icon('lock')}</span>
+    <h1>Crie sua nova senha</h1>
+    <p class="muted">Para a conta <b>${esc(session.user.email)}</b>.</p>
+    ${passwordFormHtml('np')}`);
+  bindPasswordForm('np', async () => {
+    toast('Senha alterada com sucesso');
+    await enter(session);
+  });
+}
+
+/** Formulário de nova senha (usado na recuperação e em Ajustes → Alterar senha). */
+function passwordFormHtml(prefix) {
+  return `<form id="${prefix}-form" class="form" novalidate>
+    <div class="field"><label for="${prefix}-pass">Nova senha</label><input id="${prefix}-pass" type="password" autocomplete="new-password" minlength="8"></div>
+    <div class="field"><label for="${prefix}-pass2">Repita a nova senha</label><input id="${prefix}-pass2" type="password" autocomplete="new-password" minlength="8"></div>
+    <label class="check-row"><input type="checkbox" id="${prefix}-show"> Mostrar senha</label>
+    <p class="hint" style="margin:0">Use pelo menos 8 caracteres, misturando letras e números.</p>
+    <button class="btn btn-primary btn-block" type="submit">Salvar nova senha</button>
+  </form>`;
+}
+
+function bindPasswordForm(prefix, onDone) {
+  const p1 = $(`#${prefix}-pass`), p2 = $(`#${prefix}-pass2`);
+  $(`#${prefix}-show`).addEventListener('change', e => {
+    p1.type = p2.type = e.target.checked ? 'text' : 'password';
+  });
+  p1.focus();
+  $(`#${prefix}-form`).addEventListener('submit', async e => {
+    e.preventDefault();
+    if (p1.value.length < 8) return toast('A senha precisa ter pelo menos 8 caracteres.');
+    if (!/[a-zA-Z]/.test(p1.value) || !/\d/.test(p1.value)) return toast('Misture letras e números na senha.');
+    if (p1.value !== p2.value) return toast('As duas senhas não são iguais.');
+    await withBusy($(`#${prefix}-form [type=submit]`), async () => {
+      await API.updatePassword(p1.value);
+      await onDone();
+    });
+  });
 }
 
 async function enter(session) {
@@ -1413,6 +1496,7 @@ function renderSettings() {
       <h2>Conta</h2>
       <p class="muted small" style="margin:-6px 0 14px">Conectada como <b>${esc(ui.email || '')}</b>. Os dados ficam salvos na nuvem (Supabase).</p>
       <div class="btn-row">
+        <button class="btn btn-ghost" data-action="change-password">${icon('lock')} Alterar senha</button>
         <button class="btn btn-ghost" data-action="export">${icon('download')} Exportar backup</button>
         <button class="btn btn-danger-ghost" data-action="logout">${icon('logout')} Sair</button>
       </div>
@@ -1595,6 +1679,18 @@ const ACTIONS = {
     }
   },
   'export': exportData,
+  'forgot-password': el => showForgotPassword(el.dataset.email || $('#l-email')?.value.trim() || ''),
+  'back-to-login': el => showLogin('', el.dataset.email || ''),
+  'change-password': () => openSheet({
+    title: 'Alterar senha',
+    body: passwordFormHtml('cp'),
+    onMount() {
+      bindPasswordForm('cp', () => {
+        closeSheet();
+        toast('Senha alterada com sucesso');
+      });
+    },
+  }),
   'logout': async () => {
     const ok = await confirmDialog('Você precisará entrar com e-mail e senha novamente.', { title: 'Sair da conta?', ok: 'Sair' });
     if (!ok) return;
@@ -1649,6 +1745,10 @@ window.addEventListener('hashchange', () => { closeSheet(); render(); window.scr
   if (!API.configured) return showSetupNeeded();
   try {
     const session = await API.session();
+    // Chegou pelo link do e-mail de recuperação: limpa o endereço e pede a nova senha
+    if (API.recoveryLink || API.linkError) history.replaceState(null, '', location.pathname);
+    if (API.linkError) return showLogin('O link de recuperação expirou ou já foi usado. Peça um novo em "Esqueci minha senha".');
+    if (API.recoveryLink && session) return showNewPassword(session);
     if (session) await enter(session);
     else showLogin();
   } catch (err) {

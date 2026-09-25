@@ -1,0 +1,24 @@
+<!--
+  Modelo do e-mail "Reset Password" (recuperação de senha).
+  Onde colar: Supabase → Authentication → Emails → Templates → Reset Password
+  Assunto sugerido: Crie sua nova senha · Agenda
+-->
+<div style="background:#f7f6f4;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;color:#1c1a19">
+  <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e8e4df;border-radius:16px;padding:32px 28px">
+    <div style="width:48px;height:48px;border-radius:14px;background:#b4537a;color:#ffffff;font-size:24px;line-height:48px;text-align:center">&#128274;</div>
+    <h1 style="font-size:22px;margin:20px 0 8px">Crie sua nova senha</h1>
+    <p style="font-size:15px;line-height:1.55;color:#4a4643;margin:0 0 24px">
+      Recebemos um pedido para redefinir a senha do painel de agendamentos da conta <b>{{ .Email }}</b>.
+      Toque no botão abaixo para criar uma nova senha.
+    </p>
+    <a href="{{ .ConfirmationURL }}"
+       style="display:inline-block;background:#b4537a;color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:14px 24px;border-radius:12px">
+      Criar nova senha
+    </a>
+    <p style="font-size:13px;line-height:1.55;color:#74706b;margin:24px 0 0">
+      O link vale por 1 hora e só pode ser usado uma vez.<br>
+      Se você não pediu para trocar a senha, pode ignorar este e-mail. Sua senha atual continua valendo.
+    </p>
+  </div>
+  <p style="text-align:center;font-size:12px;color:#74706b;margin:16px 0 0">Sistema de agendamento · desenvolvido por Leon Hauck</p>
+</div>

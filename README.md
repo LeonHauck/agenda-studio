@@ -99,6 +99,7 @@ A função de agendamento valida no servidor os serviços, o expediente, horári
    ```
 5. Em **Authentication → Sign In / Providers**, desative **Allow new users to sign up**.
 6. Copie a **Project URL** e a chave **publishable** para [`js/config.js`](js/config.js).
+7. **Recuperação de senha:** configure um SMTP próprio em **Authentication → Emails → SMTP Settings**, a URL do painel em **Authentication → URL Configuration** e cole o modelo [`supabase/email-recuperar-senha.html`](supabase/email-recuperar-senha.html) em **Emails → Templates → Reset Password**.
 
 > [!WARNING]
 > Nunca coloque a chave **secret / service_role** no site. A chave publishable foi feita para ficar pública.
@@ -128,7 +129,7 @@ git push
 - [x] ⏰ Lembretes com mensagem pronta no WhatsApp
 - [x] 🔁 Link para a cliente remarcar ou cancelar sozinha
 - [ ] 🤖 Envio 100% automático dos lembretes (API do WhatsApp, serviço pago)
-- [ ] 🔑 Recuperação de senha por e-mail
+- [x] 🔑 Recuperação de senha por e-mail
 
 ---
 
