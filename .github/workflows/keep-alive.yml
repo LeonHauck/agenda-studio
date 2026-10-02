@@ -1,12 +1,13 @@
 # Mantém o projeto do Supabase ativo.
-# No plano gratuito, o Supabase pausa projetos sem uso por 7 dias; esta tarefa faz
-# uma consulta simples ao banco uma vez por dia. Se o banco não responder, a tarefa
-# falha e o GitHub envia um e-mail de aviso ao dono do repositório.
+# No plano gratuito, o Supabase pausa projetos com pouca atividade. Esta tarefa roda
+# várias vezes por dia e: (1) grava um "batimento" no banco (função keep_alive),
+# (2) consulta os horários livres como a página das clientes faz e (3) verifica o login.
+# Se o banco não responder, a tarefa falha e o GitHub envia um e-mail de aviso.
 name: Manter Supabase ativo
 
 on:
   schedule:
-    - cron: '17 11 * * *'   # todo dia às 08:17 (horário de Brasília)
+    - cron: '17 */4 * * *'  # a cada 4 horas (6 vezes por dia)
   workflow_dispatch:         # permite rodar manualmente pela aba Actions
 
 permissions:
@@ -20,26 +21,40 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Consultar o banco (Supabase)
+      - name: Movimentar o banco (Supabase)
         run: |
           # URL e chave pública lidas do próprio site, sem duplicar configuração
           URL=$(grep -oP "supabaseUrl:\s*'\K[^']+" js/config.js)
           KEY=$(grep -oP "supabaseKey:\s*'\K[^']+" js/config.js)
+          H=(-H "apikey: $KEY" -H "Content-Type: application/json")
+
+          ok=0
           for i in 1 2 3; do
-            code=$(curl -s -o resposta.json -w '%{http_code}' \
-              "$URL/rest/v1/settings?select=business_name" -H "apikey: $KEY")
-            if [ "$code" = "200" ]; then
-              echo "Supabase ativo: $(cat resposta.json)"
-              exit 0
-            fi
-            echo "Tentativa $i falhou (HTTP $code): $(cat resposta.json)"
+            # 1. Escrita: atualiza o batimento
+            code=$(curl -s -o batimento.json -w '%{http_code}' -X POST "$URL/rest/v1/rpc/keep_alive" "${H[@]}" -d '{}')
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            echo "Tentativa $i falhou (HTTP $code): $(cat batimento.json)"
             sleep 20
           done
-          echo "::error::O Supabase não respondeu. O projeto pode estar pausado: abra o painel do Supabase e clique em Restore project."
-          exit 1
+          if [ "$ok" != "1" ]; then
+            echo "::error::O Supabase não respondeu. O projeto pode estar pausado: abra o painel do Supabase e clique em Restore project."
+            exit 1
+          fi
+          echo "Batimento gravado: $(cat batimento.json)"
+
+          # 2. Leitura: horários ocupados dos próximos dias (mesma consulta da página das clientes)
+          HOJE=$(TZ=America/Sao_Paulo date +%F)
+          FIM=$(TZ=America/Sao_Paulo date -d '+30 days' +%F)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/rest/v1/rpc/busy_slots" "${H[@]}" \
+            -d "{\"p_from\":\"$HOJE\",\"p_to\":\"$FIM\"}")
+          echo "Consulta de horários: HTTP $code"
+
+          # 3. Serviço de login (Auth)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/auth/v1/settings" -H "apikey: $KEY")
+          echo "Serviço de login: HTTP $code"
 
       # O GitHub desativa tarefas agendadas de repositórios sem commits há 60 dias.
-      # Reativar a cada execução evita que o "cutucão" diário pare sozinho.
+      # Reativar a cada execução evita que a tarefa pare sozinha.
       - name: Manter esta tarefa ativa no GitHub
         env:
           GH_TOKEN: ${{ github.token }}

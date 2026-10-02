@@ -442,6 +442,25 @@ grant execute on function public.get_booking(uuid) to anon, authenticated;
 grant execute on function public.cancel_booking(uuid) to anon, authenticated;
 grant execute on function public.reschedule_booking(uuid, date, text) to anon, authenticated;
 
+-- ---------- Manutenção: "batimento" para o Supabase não pausar o projeto ----------
+-- A tarefa automática do GitHub chama keep_alive() várias vezes por dia. A função grava
+-- a data/hora da última chamada numa tabela de uma linha só (atividade de escrita no banco).
+create table if not exists public.heartbeat (
+  id        int primary key default 1 check (id = 1),
+  last_ping timestamptz not null default now(),
+  pings     bigint not null default 0
+);
+alter table public.heartbeat enable row level security;  -- sem políticas: acesso só pela função
+
+create or replace function public.keep_alive() returns json
+language sql security definer set search_path = public as $$
+  insert into public.heartbeat (id, last_ping, pings) values (1, now(), 1)
+  on conflict (id) do update set last_ping = now(), pings = public.heartbeat.pings + 1
+  returning json_build_object('last_ping', last_ping, 'pings', pings);
+$$;
+revoke all on function public.keep_alive() from public;
+grant execute on function public.keep_alive() to anon, authenticated;
+
 -- ---------- Tempo real (o painel atualiza sozinho quando uma cliente agenda) ----------
 do $$
 declare t text;
