@@ -39,7 +39,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias), período do dia ou **toda semana** (ex.: almoço); o motivo fica visível só para a dona |
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
 | 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago, **número de faltas** e atalho para WhatsApp |
-| 💸 | **Sinal por Pix** | Percentual e prazo configuráveis; a dona confirma o recebimento e os não pagos são **cancelados automaticamente** |
+| 💸 | **Sinal por Pix** | Percentual e prazo configuráveis; a dona confirma o recebimento e os não pagos são **cancelados automaticamente**; sinais retidos (falta ou cancelamento) entram no faturamento |
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
 | ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, **intervalo de limpeza entre clientes** (padrão 15 min), cor do app, link e backup |
 
