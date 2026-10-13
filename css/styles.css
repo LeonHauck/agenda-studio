@@ -772,6 +772,32 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .done-icon.is-cancel { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
 .center { text-align: center; }
 
+/* ---------- Sinal por Pix ---------- */
+.deposit-box {
+  width: 100%; text-align: left; margin: -6px 0 16px; padding: 16px;
+  border-radius: var(--radius); border: 1.5px solid color-mix(in srgb, #1f8a78 45%, var(--line));
+  background: color-mix(in srgb, #1f8a78 6%, var(--surface));
+  display: flex; flex-direction: column; gap: 10px;
+}
+.dep-title { display: flex; align-items: center; gap: 8px; }
+.dep-title .i { color: #1f8a78; }
+.dep-amount { display: flex; justify-content: space-between; align-items: baseline; }
+.dep-amount span { font-size: 14px; color: var(--muted); }
+.dep-amount strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.deposit-box p { margin: 0; font-size: 13px; color: var(--muted); }
+.dep-key { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px; }
+.dep-key dt { color: var(--muted); font-size: 12px; }
+.dep-key dd { margin: 0; font-weight: 600; word-break: break-word; }
+.done-icon.is-pending { background: color-mix(in srgb, #c98a14 16%, transparent); color: #b7791f; }
+
+.tag-deposit { background: color-mix(in srgb, #c98a14 16%, transparent); color: #9a6410; }
+.reminder-banner.is-deposit { border-color: color-mix(in srgb, #1f8a78 40%, var(--line)); background: color-mix(in srgb, #1f8a78 9%, var(--surface)); }
+.reminder-banner.is-deposit > .i, .reminder-banner.is-deposit .block-edit { color: #1f8a78; }
+.notice > .i { flex: none; }
+.status-line { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; background: var(--surface-2); color: var(--muted); }
+.status-line .i { width: 16px; height: 16px; }
+.status-line.is-on { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+
 /* ---------- Rodapé (crédito) ---------- */
 .credit { margin: 32px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
 .credit a {

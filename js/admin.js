@@ -55,6 +55,11 @@ const publicUrl = () => new URL('../', location.href).href;
 const MAX_INTERVAL = 240; // mesmo limite do banco (settings.slot_interval)
 const manageUrl = a => (a.manageToken ? `${publicUrl()}?r=${a.manageToken}` : '');
 const clientCanManage = () => db.settings.changeNoticeHours >= 0;
+// Sinal por Pix: vale quando há percentual e chave cadastrada; "pendente" = a dona ainda não confirmou
+const depositActive = () => db.settings.depositPercent > 0 && Boolean(db.settings.pixKey);
+const pendingDeposit = a => a.status === 'agendado' && a.depositAmount > 0 && !a.depositPaidAt;
+const pendingDeposits = () => db.appointments.filter(pendingDeposit)
+  .sort((x, y) => String(x.depositDueAt || '').localeCompare(String(y.depositDueAt || '')));
 // Trecho com o link de remarcar/cancelar, para anexar às mensagens de WhatsApp
 const manageLine = a => (clientCanManage() && a.manageToken
   ? `
@@ -245,9 +250,10 @@ function startRealtime() {
     }
     if (table === 'appointments' && payload.eventType === 'UPDATE' && row?.client_action && row.client_action_at &&
         Date.now() - Date.parse(row.client_action_at) < 60000) {
-      toast(row.client_action === 'cancelou'
-        ? `${row.client_name} cancelou o horário de ${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`
-        : `${row.client_name} remarcou para ${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`);
+      const when = `${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`;
+      toast(row.client_action === 'cancelou' ? `${row.client_name} cancelou o horário de ${when}`
+        : row.client_action === 'expirou' ? `Sinal não pago: o horário de ${row.client_name} (${when}) foi liberado`
+        : `${row.client_name} remarcou para ${when}`);
     }
     scheduleReload();
   });
@@ -354,6 +360,7 @@ function renderAgenda() {
       <div class="week">${week}</div>
     </section>
 
+    ${depositBanner()}
     ${reminderBanner()}
 
     <section class="stats">
@@ -444,6 +451,8 @@ function blockCard(b) {
 }
 
 function apptTags(a) {
+  if (pendingDeposit(a)) return '<span class="tag tag-deposit">aguardando sinal</span>';
+  if (a.clientAction === 'expirou' && a.status === 'cancelado') return '<span class="tag tag-warn">sinal não pago</span>';
   if (a.clientAction === 'cancelou' && a.status === 'cancelado') return '<span class="tag tag-warn">cancelado pela cliente</span>';
   if (a.clientAction === 'remarcou' && isActive(a)) return '<span class="tag tag-info">remarcado pela cliente</span>';
   if (a.source === 'online') return `<span class="tag" title="Agendado pela cliente">${icon('globe')}online</span>`;
@@ -783,6 +792,13 @@ function openApptForm(appt, preset = {}) {
       </div>
     </div>` : '';
 
+  const depositNote = !isEdit || !a.depositAmount ? ''
+    : pendingDeposit(a)
+      ? `<div class="notice">${icon('pix')}<p><b>Aguardando sinal de ${money(a.depositAmount)}</b>${a.depositDueAt ? ` · prazo até ${fmtDateTime(a.depositDueAt)}` : ''}. Sem a confirmação, o horário é cancelado automaticamente.<br>
+          <button type="button" class="btn btn-primary btn-sm" style="margin-top:8px" data-action="confirm-deposit" data-id="${a.id}">${icon('check')} Confirmar sinal recebido</button></p></div>`
+      : a.depositPaidAt
+        ? `<p class="notice-soft">${icon('pix')}<span>Sinal de <b>${money(a.depositAmount)}</b> recebido em ${fmtDateTime(a.depositPaidAt)}. Restante a receber: <b>${money(Math.max(a.price - a.depositAmount, 0))}</b>.</span></p>`
+        : '';
   const origin = isEdit && a.source === 'online'
     ? `<p class="notice-soft">${icon('globe')} Agendado pela cliente pelo link${a.createdAt ? ` em ${fmtDateShort(a.createdAt.slice(0, 10))}` : ''}. Você pode alterar qualquer informação.</p>`
     : '';
@@ -791,6 +807,7 @@ function openApptForm(appt, preset = {}) {
     title: isEdit ? 'Editar agendamento' : 'Novo agendamento',
     body: `<form id="appt-form" class="form" autocomplete="off" novalidate>
       ${origin}
+      ${depositNote}
       <div class="field">
         <label for="f-client">Cliente</label>
         <input id="f-client" list="dl-clients" maxlength="80" placeholder="Nome da cliente">
@@ -1025,6 +1042,56 @@ async function offerChangeNotice(before, after) {
   }
   const ok = await confirmDialog(`Vamos abrir o WhatsApp com uma mensagem pronta para ${after.clientName}.`, { title, ok: 'Abrir WhatsApp' });
   if (ok) window.open(waLink(after.phone, text), '_blank', 'noopener');
+}
+
+/* ============================================================
+   Sinal por Pix: a dona confere o comprovante e confirma
+   ============================================================ */
+function depositBanner() {
+  const list = pendingDeposits();
+  if (!list.length) return '';
+  return `<button class="reminder-banner is-deposit" data-action="open-deposits">
+    ${icon('pix')}
+    <div><b>${list.length} sinal${list.length === 1 ? '' : 'is'} aguardando confirmação</b><span>${money(sum(list, a => a.depositAmount))} · confira os comprovantes</span></div>
+    <span class="block-edit">Ver</span>
+  </button>`;
+}
+
+function openDeposits() {
+  const list = pendingDeposits();
+  openSheet({
+    title: 'Sinais aguardando confirmação',
+    body: `<div class="stack">
+      <p class="notice-soft">${icon('pix')}<span>Confira o Pix no seu banco e toque em <b>Confirmar</b>. Sem a confirmação até o prazo, o horário é cancelado e liberado automaticamente.</span></p>
+      <div class="rem-list">${list.length ? list.map(a => `
+        <div class="rem-row">
+          <div class="h-main"><strong>${esc(a.clientName)} · ${money(a.depositAmount)}</strong>
+            <span>${fmtDateShort(a.date).slice(0, 5)} às ${a.start}${a.depositDueAt ? ` · prazo até ${fmtDateTime(a.depositDueAt)}` : ''}</span></div>
+          <button type="button" class="btn btn-sm btn-primary" data-action="confirm-deposit" data-id="${a.id}">${icon('check')} Confirmar</button>
+        </div>`).join('') : '<p class="muted small" style="margin:8px 0 0">Nenhum sinal pendente.</p>'}
+      </div>
+    </div>`,
+    footer: '<span class="spacer"></span><button type="button" class="btn btn-ghost" data-action="close-sheet">Fechar</button>',
+  });
+}
+
+async function confirmDeposit(id, btn) {
+  const a = db.appointments.find(x => x.id === id);
+  if (!a) return;
+  let saved;
+  const ok = await withBusy(btn, async () => {
+    saved = await API.saveAppointment({ ...a, status: 'confirmado', depositPaidAt: new Date().toISOString() });
+    putLocal('appointments', saved);
+  });
+  if (!ok) return;
+  closeSheet();
+  render();
+  toast('Sinal confirmado. Horário garantido.');
+  if (!saved.phone) return;
+  const send = await confirmDialog(`Vamos abrir o WhatsApp com uma mensagem pronta para ${saved.clientName}.`, { title: 'Avisar que o horário está confirmado?', ok: 'Abrir WhatsApp' });
+  if (send) {
+    window.open(waLink(saved.phone, `Olá, ${firstName(saved.clientName)}! Recebi seu sinal de ${money(saved.depositAmount)}. Seu horário no ${db.settings.businessName} está confirmado: ${fmtDateLong(saved.date)}, às ${saved.start}. Até lá!${manageLine(saved)}`), '_blank', 'noopener');
+  }
 }
 
 /* ============================================================
@@ -1555,6 +1622,63 @@ function renderSettings() {
           </div>
           <small class="muted small">Tempo reservado depois de cada cliente para limpeza e esterilização. ${s.bufferMinutes ? `Ex.: atendimento das 10:00 às 11:00 → próximo horário a partir das ${fromMin(660 + Number(s.bufferMinutes))}.` : 'Sem intervalo, o próximo horário começa logo que o anterior termina.'}</small>
         </div>
+        <div class="field">
+          <label for="set-lead">Antecedência mínima para a cliente agendar</label>
+          <select id="set-lead" data-setting="minLeadMinutes">${LEAD_OPTIONS.map(([v, label]) =>
+            `<option value="${v}" ${s.minLeadMinutes === v ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
+          <small class="muted small">Evita agendamentos em cima da hora pelo link. Pelo painel, você continua podendo marcar a qualquer momento.</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="card pad">
+      <h2>Sinal por Pix</h2>
+      <p class="muted small" style="margin:-6px 0 12px">Ao agendar pelo link, a cliente paga um sinal por Pix. Você confere o comprovante e confirma no painel. Sem a confirmação até o prazo, o horário é cancelado e liberado automaticamente.</p>
+      <p class="status-line ${depositActive() ? 'is-on' : ''}">${depositActive()
+        ? `${icon('check')} Ativo: sinal de ${s.depositPercent}% com prazo de ${s.depositHours}h`
+        : `${icon('alert')} Inativo: ${s.depositPercent > 0 ? 'informe a chave Pix para começar a pedir o sinal' : 'o percentual está em "Não pedir sinal"'}`}</p>
+      <div class="form">
+        <div class="row">
+          <div class="field">
+            <label for="set-dep">Valor do sinal</label>
+            <select id="set-dep" data-setting="depositPercent">${[0, 20, 30, 40, 50, 100].map(v =>
+              `<option value="${v}" ${s.depositPercent === v ? 'selected' : ''}>${v ? `${v}% do total` : 'Não pedir sinal'}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label for="set-dep-hours">Prazo para pagar</label>
+            <select id="set-dep-hours" data-setting="depositHours">${[2, 6, 12, 24, 48].map(v =>
+              `<option value="${v}" ${s.depositHours === v ? 'selected' : ''}>${v} horas</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="set-pix-type">Tipo de chave Pix</label>
+            <select id="set-pix-type" data-setting="pixType">${Object.entries(PIX_TYPES).map(([k, label]) =>
+              `<option value="${k}" ${pixKeyType(s.pixKey) === k ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label for="set-pix-key">Chave Pix</label>
+            <input id="set-pix-key" data-setting="pixKey" maxlength="80" value="${esc(pixKeyDisplay(s.pixKey))}" placeholder="Sua chave">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="set-pix-name">Nome do recebedor</label>
+            <input id="set-pix-name" data-setting="pixName" maxlength="25" value="${esc(s.pixName)}" placeholder="Como aparece no banco">
+          </div>
+          <div class="field">
+            <label for="set-pix-city">Cidade</label>
+            <input id="set-pix-city" data-setting="pixCity" maxlength="15" value="${esc(s.pixCity)}" placeholder="Ex.: Sao Paulo">
+          </div>
+        </div>
+        ${s.pixKey ? `<div>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="copy-pix-test">${icon('copy')} Copiar código de teste (R$ 1,00)</button>
+          <small class="muted small" style="display:block;margin-top:6px">Cole no app do seu banco (Pix copia e cola) e confira se aparecem o seu nome e R$ 1,00. Não precisa concluir o pagamento.</small>
+        </div>` : ''}
       </div>
     </section>
 
@@ -1581,6 +1705,12 @@ function renderSettings() {
     </section>
 
     <section class="card pad">
+      <h2>Minha agenda no celular</h2>
+      <p class="muted small" style="margin:-6px 0 12px">Veja seus atendimentos no calendário do seu celular, junto com seus compromissos pessoais. Aparecem o serviço, o horário e o primeiro nome da cliente.</p>
+      ${calendarCardHtml()}
+    </section>
+
+    <section class="card pad">
       <h2>Cor do aplicativo</h2>
       <div class="swatches">${ACCENTS.map(c => `
         <label><input type="radio" name="accent" data-setting="accent" value="${c}" ${s.accent === c ? 'checked' : ''}><span style="background:${c}"></span></label>`).join('')}
@@ -1597,6 +1727,23 @@ function renderSettings() {
       </div>
     </section>
   </div>`;
+}
+
+const LEAD_OPTIONS = [
+  [0, 'Sem antecedência mínima'], [30, '30 minutos antes'], [60, '1 hora antes'], [120, '2 horas antes'],
+  [180, '3 horas antes'], [360, '6 horas antes'], [720, '12 horas antes'], [1440, '24 horas antes'],
+];
+
+function calendarCardHtml() {
+  if (!db.calendarToken) return '<p class="muted small" style="margin:0">Indisponível no momento. Atualize o banco de dados para ativar.</p>';
+  const webcal = API.calendarFeedUrl(db.calendarToken).replace(/^https?:/, 'webcal:');
+  return `<div class="btn-row">
+      <a class="btn btn-primary" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}">${icon('calendar')} Adicionar ao Google Agenda</a>
+      <a class="btn btn-ghost" href="${esc(webcal)}">${icon('calendar')} Adicionar no iPhone</a>
+      <button type="button" class="btn btn-ghost" data-action="copy-calendar">${icon('copy')} Copiar link</button>
+    </div>
+    <p class="muted small" style="margin:12px 0 0">A agenda se atualiza sozinha, mas quem decide o momento é o aplicativo de calendário: no <b>iPhone</b>, em minutos ou poucas horas; no <b>Google Agenda</b>, pode levar de 12 a 24 horas. Este link é secreto: quem tiver ele consegue ver a sua agenda.
+      <button type="button" class="link-btn" style="display:inline" data-action="reset-calendar">Gerar um novo link</button></p>`;
 }
 
 const NOTICE_OPTIONS = [
@@ -1624,6 +1771,12 @@ async function onSettingChange(el) {
   const s = db.settings;
   if (key === 'workDays') {
     s.workDays = $$('[data-setting=workDays]:checked').map(i => Number(i.value)).sort();
+  } else if (key === 'minLeadMinutes' || key === 'depositPercent' || key === 'depositHours') {
+    s[key] = Number(el.value);
+  } else if (key === 'pixKey' || key === 'pixType') {
+    s.pixKey = normalizePixKey($('#set-pix-type').value, $('#set-pix-key').value);
+  } else if (key === 'pixName' || key === 'pixCity') {
+    s[key] = el.value.trim();
   } else if (key === 'bufferMinutes') {
     const min = Math.round(Number(el.value) / 5) * 5;
     if (el.value === '' || min < 0 || min > 120) {
@@ -1756,6 +1909,23 @@ const ACTIONS = {
   'open-client': el => { const c = db.clients.find(x => x.id === el.dataset.id); if (c) openClientForm(c); },
   'close-sheet': el => { closeSheet(); if (el.getAttribute('href')) location.hash = el.getAttribute('href'); },
   'open-reminders': () => openReminders(),
+  'open-deposits': () => openDeposits(),
+  'confirm-deposit': el => confirmDeposit(el.dataset.id, el),
+  'copy-pix-test': () => {
+    const st = db.settings;
+    copyText(pixPayload({ key: st.pixKey, name: st.pixName || st.businessName, city: st.pixCity, amount: 1 }),
+      'Código de teste copiado. Cole no app do seu banco.');
+  },
+  'copy-calendar': () => copyText(API.calendarFeedUrl(db.calendarToken), 'Link do calendário copiado'),
+  'reset-calendar': async () => {
+    const ok = await confirmDialog('O link atual para de funcionar. Você precisará adicionar o novo link no seu calendário de novo.', { title: 'Gerar um novo link?', ok: 'Gerar novo link', danger: true });
+    if (!ok) return;
+    await withBusy(null, async () => {
+      db.calendarToken = await API.resetCalendarToken();
+      render();
+      toast('Novo link gerado');
+    });
+  },
   'copy-manage': async el => {
     const a = db.appointments.find(x => x.id === el.dataset.id);
     if (!a) return;

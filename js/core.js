@@ -68,6 +68,70 @@ function formatPhone(v) {
   if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
 }
+/** "2026-10-14T11:30:00Z" → "14/10 às 08:30" (horário do aparelho). */
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} às ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/* ---------- Pix ---------- */
+const PIX_TYPES = { cpf: 'CPF', cnpj: 'CNPJ', celular: 'Celular', email: 'E-mail', aleatoria: 'Chave aleatória' };
+
+/** Deixa a chave no formato exigido pelo Pix (ex.: celular vira +5511999999999). */
+function normalizePixKey(type, raw) {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  if (type === 'email') return v.toLowerCase();
+  if (type === 'aleatoria') return v.toLowerCase();
+  const d = digits(v);
+  if (type === 'celular') return '+' + (d.startsWith('55') && d.length >= 12 ? d : '55' + d);
+  return d; // CPF ou CNPJ: só números
+}
+function pixKeyType(key) {
+  if (!key) return 'celular';
+  if (key.includes('@')) return 'email';
+  if (key.startsWith('+')) return 'celular';
+  if (/^[0-9a-f]{8}-/.test(key)) return 'aleatoria';
+  return key.length > 11 ? 'cnpj' : 'cpf';
+}
+function pixKeyDisplay(key) {
+  const type = pixKeyType(key);
+  if (type === 'celular') return formatPhone(key.replace(/^\+55/, ''));
+  if (type === 'cpf') return key.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  if (type === 'cnpj') return key.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  return key;
+}
+
+/**
+ * Código "Pix copia e cola" (BR Code estático, padrão do Banco Central) com valor definido.
+ * Validado contra o exemplo do manual do BC (CRC 1D3D).
+ */
+function pixPayload({ key, name, city, amount }) {
+  const clean = (t, max) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, max);
+  const f = (id, v) => id + String(v.length).padStart(2, '0') + v;
+  const account = f('00', 'br.gov.bcb.pix') + f('01', key);
+  const p = f('00', '01') + f('26', account) + f('52', '0000') + f('53', '986') +
+    (amount > 0 ? f('54', Number(amount).toFixed(2)) : '') + f('58', 'BR') +
+    f('59', clean(name, 25) || 'Recebedor') + f('60', clean(city, 15) || 'Brasil') +
+    f('62', f('05', '***')) + '6304';
+  let crc = 0xFFFF;
+  for (const ch of p) {
+    crc ^= ch.charCodeAt(0) << 8;
+    for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+  }
+  return p + crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+async function copyText(text, okMessage) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(okMessage || 'Copiado');
+  } catch {
+    window.prompt('Copie:', text);
+  }
+}
+
 function waLink(phone, text) {
   let d = digits(phone);
   if (d.length === 10 || d.length === 11) d = '55' + d;
@@ -81,7 +145,7 @@ function waLink(phone, text) {
  * O intervalo de limpeza (settings.bufferMinutes) é reservado entre atendimentos;
  * não é somado antes de bloqueios nem do horário de fechamento.
  */
-function computeSlots(settings, appts, date, duration, excludeId = null) {
+function computeSlots(settings, appts, date, duration, excludeId = null, leadMinutes = 0) {
   const open = toMin(settings.openTime), close = toMin(settings.closeTime), step = settings.slotInterval;
   const buffer = Number(settings.bufferMinutes) || 0;
   const busy = appts
@@ -90,10 +154,13 @@ function computeSlots(settings, appts, date, duration, excludeId = null) {
       const extra = a.kind === 'block' ? 0 : buffer;
       return [toMin(a.start), toMin(a.start) + a.duration + extra, extra];
     });
-  const minStart = date === todayKey() ? nowMinutes() : -1;
+  // Primeiro horário permitido: agora + antecedência mínima (em minutos desde a meia-noite de hoje).
+  // Datas passadas não são filtradas (a dona pode registrar atendimentos antigos).
+  const dayOffset = Math.round((parseKey(date) - parseKey(todayKey())) / 86400000) * 1440;
+  const earliest = nowMinutes() + leadMinutes;
   const slots = [];
   for (let t = open; t + duration <= close; t += step) {
-    if (t < minStart) continue;
+    if (dayOffset >= 0 && dayOffset + t < earliest) continue;
     if (busy.some(([b, e, extra]) => t < e && t + duration + extra > b)) continue;
     slots.push(t);
   }
@@ -126,6 +193,7 @@ const ICONS = {
   logout: '<path d="M14 4h3.5A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/>',
+  pix: '<path d="M12 3l3.2 3.2a3 3 0 0 0 2.1.9h1.2L21 9.6a3.4 3.4 0 0 1 0 4.8l-2.5 2.5h-1.2a3 3 0 0 0-2.1.9L12 21l-3.2-3.2a3 3 0 0 0-2.1-.9H5.5L3 14.4a3.4 3.4 0 0 1 0-4.8l2.5-2.5h1.2a3 3 0 0 0 2.1-.9z"/><path d="M8.5 9.5L12 13l3.5-3.5M8.5 14.5L12 11l3.5 3.5"/>',
   bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
 };

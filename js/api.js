@@ -48,6 +48,12 @@ const API = (() => {
     accent: r.accent,
     changeNoticeHours: r.change_notice_hours ?? 2,
     bufferMinutes: r.buffer_minutes ?? 0,
+    minLeadMinutes: r.min_lead_minutes ?? 0,
+    depositPercent: r.deposit_percent ?? 0,
+    depositHours: r.deposit_hours ?? 12,
+    pixKey: r.pix_key || '',
+    pixName: r.pix_name || '',
+    pixCity: r.pix_city || '',
   });
   const settingsTo = s => ({
     business_name: s.businessName,
@@ -59,6 +65,12 @@ const API = (() => {
     accent: s.accent,
     change_notice_hours: s.changeNoticeHours ?? 2,
     buffer_minutes: s.bufferMinutes ?? 0,
+    min_lead_minutes: s.minLeadMinutes ?? 0,
+    deposit_percent: s.depositPercent ?? 0,
+    deposit_hours: s.depositHours ?? 12,
+    pix_key: s.pixKey || '',
+    pix_name: s.pixName || '',
+    pix_city: s.pixCity || '',
   });
   const serviceFrom = r => ({
     id: r.id, name: r.name, price: Number(r.price), duration: r.duration, color: r.color, active: r.active, sort: r.sort,
@@ -87,6 +99,9 @@ const API = (() => {
     clientAction: r.client_action || '',
     clientActionAt: r.client_action_at,
     reminderSentAt: r.reminder_sent_at,
+    depositAmount: Number(r.deposit_amount) || 0,
+    depositDueAt: r.deposit_due_at,
+    depositPaidAt: r.deposit_paid_at,
   });
   const apptTo = a => withId(a, {
     client_id: a.clientId || null,
@@ -101,6 +116,7 @@ const API = (() => {
     payment_method: a.payment || null,
     notes: a.notes || '',
     reminder_sent_at: a.reminderSentAt || null,
+    deposit_paid_at: a.depositPaidAt || null,
   });
   const blockFrom = r => ({
     id: r.id, startDate: r.start_date, endDate: r.end_date,
@@ -176,7 +192,9 @@ const API = (() => {
     /* ---------- Painel da dona ---------- */
     async loadAll() {
       const since = dateKey(addDays(new Date(), -400));
-      const [settings, services, clients, appointments, blocks] = await Promise.all([
+      // Reserva caso o agendador interno do banco não tenha rodado: cancela sinais vencidos
+      await sb.rpc('expire_unpaid_deposits').then(() => {}, () => {});
+      const [settings, services, clients, appointments, blocks, calendarToken] = await Promise.all([
         sb.from('settings').select('*').eq('id', 1).single().then(({ data, error }) => { check(error); return settingsFrom(data); }),
         fetchAll('services', q => q.order('sort').order('name').order('id')).then(rows => rows.map(serviceFrom)),
         fetchAll('clients', q => q.order('name').order('id')).then(rows => rows.map(clientFrom)),
@@ -185,8 +203,10 @@ const API = (() => {
         fetchAll('blocks', q => q.gte('end_date', since).order('start_date').order('id'))
           .then(rows => rows.map(blockFrom))
           .catch(err => { console.warn('Bloqueios indisponíveis:', err.message); return []; }),
+        sb.from('secrets').select('calendar_token').eq('id', 1).maybeSingle()
+          .then(({ data }) => data?.calendar_token || null, () => null),
       ]);
-      return { settings, services, clients, appointments, blocks };
+      return { settings, services, clients, appointments, blocks, calendarToken };
     },
     async saveSettings(s) {
       const { error } = await sb.from('settings').update(settingsTo(s)).eq('id', 1);
@@ -207,6 +227,17 @@ const API = (() => {
         .update({ reminder_sent_at: new Date().toISOString() }).eq('id', id).select().single();
       check(error);
       return apptFrom(data);
+    },
+    /** Link que os aplicativos de calendário (Google, iPhone) assinam para mostrar a agenda. */
+    calendarFeedUrl(token) {
+      return `${cfg.supabaseUrl}/rest/v1/rpc/agenda_ics?apikey=${encodeURIComponent(cfg.supabaseKey)}&p_token=${token}`;
+    },
+    /** Troca o código secreto do calendário (o link antigo para de funcionar). */
+    async resetCalendarToken() {
+      const token = crypto.randomUUID();
+      const { error } = await sb.from('secrets').update({ calendar_token: token }).eq('id', 1);
+      check(error);
+      return token;
     },
     saveBlock: async b => blockFrom(await saveRow('blocks', blockTo(b))),
     deleteBlock: id => deleteRow('blocks', id),

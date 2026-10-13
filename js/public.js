@@ -28,7 +28,34 @@ const needDuration = () => (st.mode === 'manage' ? st.booking.duration : totals(
 // Dia de atendimento e sem bloqueio de dia inteiro (que chega como 00:00 com 1440 minutos)
 const isWorkDay = k => st.info.settings.workDays.includes(parseKey(k).getDay()) &&
   !st.busy.some(b => b.date === k && b.duration >= 1440);
-const slotsFor = k => (isWorkDay(k) ? computeSlots(st.info.settings, st.busy, k, needDuration()) : []);
+const slotsFor = k => (isWorkDay(k)
+  ? computeSlots(st.info.settings, st.busy, k, needDuration(), null, st.info.settings.minLeadMinutes || 0)
+  : []);
+
+/* ---------- Sinal por Pix ---------- */
+// O sinal só vale se a dona definiu o percentual e cadastrou a chave Pix
+const depositFor = price => {
+  const s = st.info.settings;
+  return s.depositPercent > 0 && s.pixKey ? Math.round(price * s.depositPercent) / 100 : 0;
+};
+
+function depositBox({ amount, dueAt, name, date, start }) {
+  const s = st.info.settings;
+  const receiver = s.pixName || s.businessName;
+  const code = pixPayload({ key: s.pixKey, name: receiver, city: s.pixCity, amount });
+  const msg = `Olá! Segue o comprovante do sinal de ${money(amount)} do meu horário de ${fmtDateLong(date)} às ${start}. Nome: ${name}.`;
+  return `<div class="deposit-box">
+    <b class="dep-title">${icon('pix')} Pague o sinal para confirmar</b>
+    <div class="dep-amount"><span>Sinal (${s.depositPercent}%)</span><strong>${money(amount)}</strong></div>
+    <p>Pague por Pix${dueAt ? ` <b>até ${fmtDateTime(dueAt)}</b>` : ''}. Sem o sinal, o horário é cancelado automaticamente. O restante você paga no estúdio.</p>
+    <button class="btn btn-primary btn-block" data-action="copy-pix" data-code="${esc(code)}">${icon('copy')} Copiar código Pix (copia e cola)</button>
+    <dl class="dep-key">
+      <div><dt>Chave Pix (${PIX_TYPES[pixKeyType(s.pixKey)]})</dt><dd>${esc(pixKeyDisplay(s.pixKey))}</dd></div>
+      <div><dt>Recebedor</dt><dd>${esc(receiver)}</dd></div>
+    </dl>
+    ${s.whatsapp ? `<a class="btn btn-ghost btn-wa btn-block" href="${waLink(s.whatsapp, msg)}" target="_blank" rel="noopener">${icon('chat')} Enviar comprovante pelo WhatsApp</a>` : ''}
+  </div>`;
+}
 const nextDays = () => Array.from({ length: HORIZON }, (_, i) => dateKey(addDays(new Date(), i)));
 const manageUrl = token => `${location.origin}${location.pathname}?r=${token}`;
 
@@ -171,6 +198,7 @@ function stepDetails() {
     <button class="back-link" data-action="go-step" data-step="2">${icon('chevLeft')} Horário</button>
     <h2 class="pub-title">Confirme seus dados</h2>
     ${summaryCard({ date: st.date, start: st.start, duration, price, services: selectedServices() })}
+    ${depositFor(price) ? `<p class="notice-soft" style="margin:-8px 0 20px">${icon('pix')}<span>Para confirmar o horário, será pedido um <b>sinal de ${money(depositFor(price))}</b> (${st.info.settings.depositPercent}%) por Pix, em até ${st.info.settings.depositHours}h. O restante é pago no estúdio.</span></p>` : ''}
     <form id="book-form" class="form" autocomplete="on" novalidate>
       <div class="field"><label for="b-name">Seu nome</label><input id="b-name" name="name" autocomplete="name" maxlength="80" placeholder="Nome e sobrenome"></div>
       <div class="field"><label for="b-phone">WhatsApp</label><input id="b-phone" name="tel" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="(00) 00000-0000"></div>
@@ -192,11 +220,13 @@ function stepDone() {
   const waMsg = `Olá! Acabei de agendar pelo link: ${d.services.map(x => x.name).join(' + ')}, ${fmtDateLong(d.date)} às ${d.start}. Nome: ${d.name}.`;
   const canManage = s.changeNoticeHours >= 0 && d.token;
 
+  const pending = d.deposit > 0;
   return `<div class="done">
-    <span class="done-icon">${icon('check')}</span>
-    <h2>Horário confirmado!</h2>
-    <p class="pub-sub">Te esperamos ${esc(fmtDateLong(d.date))}, às ${d.start}.</p>
+    <span class="done-icon ${pending ? 'is-pending' : ''}">${icon(pending ? 'clock' : 'check')}</span>
+    <h2>${pending ? 'Horário reservado!' : 'Horário confirmado!'}</h2>
+    <p class="pub-sub">${pending ? 'Falta só o sinal para confirmar seu horário.' : `Te esperamos ${esc(fmtDateLong(d.date))}, às ${d.start}.`}</p>
     ${summaryCard(d)}
+    ${pending ? depositBox({ amount: d.deposit, dueAt: d.depositDueAt, name: d.name, date: d.date, start: d.start }) : ''}
     ${canManage ? `<div class="manage-box">
       <b>${icon('link')} Guarde seu link pessoal</b>
       <p>Por ele você pode remarcar ou cancelar${s.changeNoticeHours > 0 ? ` até ${s.changeNoticeHours}h antes` : ''}. Ele também fica salvo neste aparelho.</p>
@@ -204,8 +234,8 @@ function stepDone() {
     </div>` : ''}
     <div class="done-actions">
       <a class="btn btn-ghost btn-block" href="${calendarLink(d)}" target="_blank" rel="noopener">${icon('calendar')} Salvar na minha agenda</a>
-      ${s.whatsapp ? `<a class="btn btn-ghost btn-wa btn-block" href="${waLink(s.whatsapp, waMsg)}" target="_blank" rel="noopener">${icon('chat')} Falar com o estúdio</a>` : ''}
-      <button class="btn btn-primary btn-block" data-action="restart">Fazer outro agendamento</button>
+      ${s.whatsapp && !pending ? `<a class="btn btn-ghost btn-wa btn-block" href="${waLink(s.whatsapp, waMsg)}" target="_blank" rel="noopener">${icon('chat')} Falar com o estúdio</a>` : ''}
+      <button class="btn ${pending ? 'btn-ghost' : 'btn-primary'} btn-block" data-action="restart">Fazer outro agendamento</button>
     </div>
   </div>`;
 }
@@ -222,7 +252,7 @@ function bottomBar() {
     info = st.start ? `<b>${DOW_SHORT[parseKey(st.date).getDay()]}, ${fmtDateShort(st.date).slice(0, 5)} às ${st.start}</b><span>${fmtDuration(duration)} · ${money(price)}</span>` : '<span>Escolha um horário</span>';
     button = `<button class="btn btn-primary" data-action="go-step" data-step="3" ${st.start ? '' : 'disabled'}>Continuar</button>`;
   } else {
-    info = `<b>${money(price)}</b><span>Pagamento no estúdio</span>`;
+    info = `<b>${money(price)}</b><span>${depositFor(price) ? `Sinal de ${money(depositFor(price))} por Pix` : 'Pagamento no estúdio'}</span>`;
     button = '<button class="btn btn-primary" type="submit" form="book-form" id="confirm-btn">Confirmar agendamento</button>';
   }
   return barHtml(info, button);
@@ -278,7 +308,10 @@ async function submitBooking(e) {
 
   writeStore(REMEMBER_KEY, { name, phone });
   if (result.token) rememberBooking(result.token, result.date, result.start);
-  st.done = { date: result.date, start: result.start, duration: result.duration, price, services, name, token: result.token };
+  st.done = {
+    date: result.date, start: result.start, duration: result.duration, price, services, name, token: result.token,
+    deposit: Number(result.deposit) || 0, depositDueAt: result.depositDueAt,
+  };
   st.step = 4;
   render();
   window.scrollTo(0, 0);
@@ -317,7 +350,8 @@ function manageBody() {
   }
 
   // Visualização do horário
-  const status = b.status === 'faltou' ? '' : STATUS[b.status]?.label || '';
+  const awaitingDeposit = b.status === 'agendado' && Number(b.deposit) > 0 && !b.depositPaid;
+  const status = b.status === 'faltou' ? '' : awaitingDeposit ? 'Aguardando sinal' : STATUS[b.status]?.label || '';
   const past = b.date < todayKey() || b.status === 'concluido' || b.status === 'faltou';
   let actions;
   if (b.status === 'cancelado') {
@@ -354,6 +388,7 @@ function manageBody() {
       <h2 class="pub-title">Olá, ${esc(firstName(b.name))}!</h2>
       <p class="pub-sub">Este é o seu horário${status ? ` · <span class="badge st-${b.status}">${status}</span>` : ''}</p>
       ${summaryCard(b)}
+      ${awaitingDeposit ? depositBox({ amount: Number(b.deposit), dueAt: b.depositDueAt, name: b.name, date: b.date, start: b.start }) : ''}
       ${actions}`,
   };
 }
@@ -386,6 +421,7 @@ const ACTIONS = {
   'pick-day': el => { st.date = el.dataset.date; st.start = null; render(); },
   'pick-slot': el => { st.start = el.dataset.start; render(); },
   'restart': () => { st.selected = []; st.date = null; st.start = null; st.done = null; goStep(1); },
+  'copy-pix': el => copyText(el.dataset.code, 'Código Pix copiado. Cole no app do seu banco.'),
   'copy-manage': async el => {
     const url = manageUrl(el.dataset.token);
     try {

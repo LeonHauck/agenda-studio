@@ -111,6 +111,27 @@ alter table public.settings add column if not exists buffer_minutes int not null
 alter table public.settings drop constraint if exists settings_buffer_check;
 alter table public.settings add constraint settings_buffer_check check (buffer_minutes between 0 and 120);
 
+-- Atualização: antecedência mínima para a cliente agendar e sinal por Pix
+alter table public.settings add column if not exists min_lead_minutes int not null default 60;
+alter table public.settings add column if not exists deposit_percent int not null default 50;
+alter table public.settings add column if not exists deposit_hours int not null default 12;
+alter table public.settings add column if not exists pix_key text not null default '';
+alter table public.settings add column if not exists pix_name text not null default '';
+alter table public.settings add column if not exists pix_city text not null default '';
+alter table public.settings drop constraint if exists settings_lead_check;
+alter table public.settings add constraint settings_lead_check check (min_lead_minutes between 0 and 2880);
+alter table public.settings drop constraint if exists settings_deposit_check;
+alter table public.settings add constraint settings_deposit_check
+  check (deposit_percent between 0 and 100 and deposit_hours between 1 and 72);
+
+-- Sinal de cada agendamento: valor, prazo e quando a dona confirmou o recebimento
+alter table public.appointments add column if not exists deposit_amount numeric(10, 2);
+alter table public.appointments add column if not exists deposit_due_at timestamptz;
+alter table public.appointments add column if not exists deposit_paid_at timestamptz;
+alter table public.appointments drop constraint if exists appointments_client_action_check;
+alter table public.appointments add constraint appointments_client_action_check
+  check (client_action in ('cancelou', 'remarcou', 'expirou'));
+
 -- Atualização: status "faltou" (cliente não compareceu). Não ocupa horário nem conta no limite por telefone.
 alter table public.appointments drop constraint if exists appointments_status_check;
 alter table public.appointments add constraint appointments_status_check
@@ -219,6 +240,8 @@ language sql stable security definer set search_path = public as $$
     from public.appointments a
    where a.date between p_from and p_to
      and a.status not in ('cancelado', 'faltou')
+     and not (a.status = 'agendado' and coalesce(a.deposit_amount, 0) > 0
+              and a.deposit_paid_at is null and a.deposit_due_at < now())
      and (p_exclude_token is null or a.manage_token <> p_exclude_token)
      and p_to - p_from <= 62
   union all
@@ -268,6 +291,9 @@ begin
   if p_date + p_start::time < v_now then
     raise exception 'Esse horário já passou.';
   end if;
+  if p_date + p_start::time < v_now + make_interval(mins => s.min_lead_minutes) then
+    raise exception 'Esse horário está muito próximo. Escolha um horário com mais antecedência.';
+  end if;
   if p_date > v_now::date + 60 then
     raise exception 'Só é possível agendar com até 60 dias de antecedência.';
   end if;
@@ -278,6 +304,8 @@ begin
   if exists (
     select 1 from public.appointments a
      where a.date = p_date and a.status not in ('cancelado', 'faltou')
+       and not (a.status = 'agendado' and coalesce(a.deposit_amount, 0) > 0
+                and a.deposit_paid_at is null and a.deposit_due_at < now())
        and (p_exclude is null or a.id <> p_exclude)
        and v_start < public.to_min(a.start_time) + a.duration + s.buffer_minutes
        and v_start + p_duration + s.buffer_minutes > public.to_min(a.start_time)
@@ -314,6 +342,10 @@ declare
   v_client   uuid;
   v_id       uuid;
   v_token    uuid;
+  s          public.settings%rowtype;
+  v_deposit  numeric := 0;
+  v_due      timestamptz;
+  v_status   text := 'confirmado';
 begin
   if char_length(v_name) < 2 or char_length(v_name) > 80 then
     raise exception 'Informe seu nome.';
@@ -356,15 +388,30 @@ begin
     insert into public.clients (name, phone) values (v_name, v_fmt) returning id into v_client;
   end if;
 
+  -- Sinal: só vale se a dona definiu o percentual e cadastrou a chave Pix.
+  -- Com sinal, o horário fica reservado ("agendado") até a dona confirmar o recebimento.
+  select * into s from public.settings where id = 1;
+  if s.deposit_percent > 0 and btrim(s.pix_key) <> '' then
+    v_deposit := round(v_price * s.deposit_percent / 100.0, 2);
+  end if;
+  if v_deposit > 0 then
+    v_status := 'agendado';
+    v_due := least(now() + make_interval(hours => s.deposit_hours),
+                   (p_date + p_start::time) at time zone 'America/Sao_Paulo');
+  end if;
+
   insert into public.appointments
-    (client_id, client_name, phone, services, date, start_time, duration, price, status, notes, source)
+    (client_id, client_name, phone, services, date, start_time, duration, price, status, notes, source,
+     deposit_amount, deposit_due_at)
   values
-    (v_client, v_name, v_fmt, v_services, p_date, p_start, v_duration, v_price, 'confirmado',
-     left(coalesce(p_notes, ''), 300), 'online')
+    (v_client, v_name, v_fmt, v_services, p_date, p_start, v_duration, v_price, v_status,
+     left(coalesce(p_notes, ''), 300), 'online',
+     nullif(v_deposit, 0), v_due)
   returning id, manage_token into v_id, v_token;
 
   return json_build_object('id', v_id, 'token', v_token, 'date', p_date, 'start', p_start,
-                           'duration', v_duration, 'price', v_price);
+                           'duration', v_duration, 'price', v_price,
+                           'deposit', v_deposit, 'depositDueAt', v_due);
 end $$;
 
 -- Consulta um agendamento pelo link pessoal da cliente
@@ -382,7 +429,9 @@ begin
   return json_build_object(
     'date', a.date, 'start', a.start_time, 'duration', a.duration, 'price', a.price,
     'services', a.services, 'status', a.status, 'name', a.client_name,
-    'canChange', public.can_client_change(a), 'noticeHours', s.change_notice_hours);
+    'canChange', public.can_client_change(a), 'noticeHours', s.change_notice_hours,
+    'deposit', coalesce(a.deposit_amount, 0), 'depositDueAt', a.deposit_due_at,
+    'depositPaid', a.deposit_paid_at is not null);
 end $$;
 
 -- Cancelamento pela cliente
@@ -442,6 +491,121 @@ grant execute on function public.get_booking(uuid) to anon, authenticated;
 grant execute on function public.cancel_booking(uuid) to anon, authenticated;
 grant execute on function public.reschedule_booking(uuid, date, text) to anon, authenticated;
 
+-- ---------- Sinal (Pix): cancelamento automático quando o prazo vence ----------
+-- Cancela os agendamentos online cujo sinal não foi confirmado pela dona até o prazo.
+create or replace function public.expire_unpaid_deposits() returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  n int;
+begin
+  update public.appointments
+     set status = 'cancelado', client_action = 'expirou', client_action_at = now()
+   where status = 'agendado'
+     and coalesce(deposit_amount, 0) > 0
+     and deposit_paid_at is null
+     and deposit_due_at is not null
+     and deposit_due_at < now();
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function public.expire_unpaid_deposits() from public, anon;
+grant execute on function public.expire_unpaid_deposits() to authenticated;
+
+-- Agendador interno do banco: verifica os sinais vencidos a cada 10 minutos.
+-- Se a extensão pg_cron não estiver disponível, o script continua: os sinais vencidos
+-- também são cancelados pela tarefa do GitHub (keep_alive) e ao abrir o painel.
+do $$
+begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('expirar-sinais', '*/10 * * * *', 'select public.expire_unpaid_deposits()');
+exception when others then
+  raise notice 'pg_cron indisponível: %', sqlerrm;
+end $$;
+
+-- ---------- Calendário da dona (link secreto no formato iCalendar) ----------
+-- Guarda o código secreto do link. Fica numa tabela à parte porque "settings" é pública.
+create table if not exists public.secrets (
+  id             int primary key default 1 check (id = 1),
+  calendar_token uuid not null default gen_random_uuid()
+);
+insert into public.secrets (id) values (1) on conflict (id) do nothing;
+alter table public.secrets enable row level security;
+drop policy if exists "admin gerencia segredos" on public.secrets;
+create policy "admin gerencia segredos" on public.secrets
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+grant select, update on public.secrets to authenticated;
+
+create or replace function public.ics_escape(t text) returns text
+language sql immutable as $$
+  select replace(replace(replace(replace(coalesce(t, ''), '\', '\\'), ';', '\;'), ',', '\,'), E'\n', '\n')
+$$;
+
+-- O PostgREST entrega funções que retornam este tipo com Content-Type: text/calendar
+do $$
+begin
+  create domain "text/calendar" as text;
+exception when duplicate_object then null;
+end $$;
+
+-- Agenda no formato iCalendar: serviço, horário e primeiro nome da cliente (sem telefone).
+-- Só responde com o código secreto correto.
+create or replace function public.agenda_ics(p_token uuid) returns "text/calendar"
+language plpgsql stable security definer set search_path = public as $$
+declare
+  nl     text := E'\r\n';
+  v_name text;
+  v_body text;
+begin
+  if not exists (select 1 from public.secrets where id = 1 and calendar_token = p_token) then
+    raise exception 'Link de calendário inválido.';
+  end if;
+  select business_name into v_name from public.settings where id = 1;
+
+  select coalesce(string_agg(ev, nl order by d, t), '') into v_body
+    from (
+      select a.date as d, a.start_time as t,
+             'BEGIN:VEVENT' || nl ||
+             'UID:' || a.id || '@agenda-studio' || nl ||
+             'DTSTAMP:' || to_char(a.updated_at at time zone 'UTC', 'YYYYMMDD"T"HH24MISS"Z"') || nl ||
+             'DTSTART;TZID=America/Sao_Paulo:' || to_char(a.date + a.start_time::time, 'YYYYMMDD"T"HH24MISS') || nl ||
+             'DTEND;TZID=America/Sao_Paulo:' ||
+               to_char(a.date + a.start_time::time + make_interval(mins => a.duration), 'YYYYMMDD"T"HH24MISS') || nl ||
+             'SUMMARY:' || public.ics_escape(
+               coalesce((select string_agg(e ->> 'name', ' + ') from jsonb_array_elements(a.services) e), 'Atendimento')
+               || ' · ' || split_part(btrim(a.client_name), ' ', 1)
+               || case when a.status = 'agendado' and coalesce(a.deposit_amount, 0) > 0 and a.deposit_paid_at is null
+                       then ' (aguardando sinal)' else '' end) || nl ||
+             'STATUS:' || case when a.status = 'agendado' then 'TENTATIVE' else 'CONFIRMED' end || nl ||
+             'END:VEVENT' as ev
+        from public.appointments a
+       where a.status in ('agendado', 'confirmado', 'concluido')
+         and a.date >= current_date - 30
+    ) x;
+
+  return 'BEGIN:VCALENDAR' || nl ||
+         'VERSION:2.0' || nl ||
+         'PRODID:-//Agenda Studio//PT-BR' || nl ||
+         'CALSCALE:GREGORIAN' || nl ||
+         'METHOD:PUBLISH' || nl ||
+         'X-WR-CALNAME:' || public.ics_escape('Agenda · ' || v_name) || nl ||
+         'X-WR-TIMEZONE:America/Sao_Paulo' || nl ||
+         'REFRESH-INTERVAL;VALUE=DURATION:PT1H' || nl ||
+         'X-PUBLISHED-TTL:PT1H' || nl ||
+         'BEGIN:VTIMEZONE' || nl ||
+         'TZID:America/Sao_Paulo' || nl ||
+         'BEGIN:STANDARD' || nl ||
+         'DTSTART:19700101T000000' || nl ||
+         'TZOFFSETFROM:-0300' || nl ||
+         'TZOFFSETTO:-0300' || nl ||
+         'TZNAME:-03' || nl ||
+         'END:STANDARD' || nl ||
+         'END:VTIMEZONE' || nl ||
+         case when v_body = '' then '' else v_body || nl end ||
+         'END:VCALENDAR' || nl;
+end $$;
+revoke all on function public.agenda_ics(uuid) from public;
+grant execute on function public.agenda_ics(uuid) to anon, authenticated;
+
 -- ---------- Manutenção: "batimento" para o Supabase não pausar o projeto ----------
 -- A tarefa automática do GitHub chama keep_alive() várias vezes por dia. A função grava
 -- a data/hora da última chamada numa tabela de uma linha só (atividade de escrita no banco).
@@ -453,11 +617,16 @@ create table if not exists public.heartbeat (
 alter table public.heartbeat enable row level security;  -- sem políticas: acesso só pela função
 
 create or replace function public.keep_alive() returns json
-language sql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public as $$
+declare
+  r json;
+begin
+  perform public.expire_unpaid_deposits();
   insert into public.heartbeat (id, last_ping, pings) values (1, now(), 1)
   on conflict (id) do update set last_ping = now(), pings = public.heartbeat.pings + 1
-  returning json_build_object('last_ping', last_ping, 'pings', pings);
-$$;
+  returning json_build_object('last_ping', last_ping, 'pings', pings) into r;
+  return r;
+end $$;
 revoke all on function public.keep_alive() from public;
 grant execute on function public.keep_alive() to anon, authenticated;
 
