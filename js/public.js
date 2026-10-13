@@ -82,6 +82,29 @@ function rememberBooking(token, date, start) {
 function forgetBooking(token) {
   writeStore(BOOKINGS_KEY, readStore(BOOKINGS_KEY, []).filter(b => b.token !== token));
 }
+// O agendamento não existe mais (foi excluído pelo estúdio) ou o link é inválido
+const isGone = err => /não encontrado|inválido/i.test(err?.message || '');
+
+/**
+ * Confere com o banco os horários guardados neste aparelho. Remove os que foram excluídos,
+ * cancelados ou já passaram, e atualiza data e hora dos que o estúdio remarcou.
+ * Sem internet, mantém a lista como está.
+ */
+async function syncStoredBookings() {
+  const list = readStore(BOOKINGS_KEY, []);
+  if (!list.length) return;
+  const checked = await Promise.all(list.slice(0, 8).map(async b => {
+    try {
+      const d = await API.getBooking(b.token);
+      const active = !FREES_SLOT.includes(d.status) && d.status !== 'concluido' && d.date >= todayKey();
+      return active ? { token: b.token, date: d.date, start: d.start } : null;
+    } catch (err) {
+      return isGone(err) ? null : b;
+    }
+  }));
+  writeStore(BOOKINGS_KEY, checked.filter(Boolean));
+}
+
 const upcomingBookings = () => readStore(BOOKINGS_KEY, [])
   .filter(b => b.date >= todayKey())
   .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
@@ -531,13 +554,24 @@ document.addEventListener('click', e => {
   }
   root.innerHTML = `<div class="pub-loading">${icon('calendar')}<p>Carregando…</p></div>`;
   try {
-    st.info = await API.publicInfo();
+    const token = new URLSearchParams(location.search).get('r');
+    // Na página inicial, a lista "Seus horários marcados" é conferida com o banco antes de aparecer
+    [st.info] = await Promise.all([API.publicInfo(), token ? null : syncStoredBookings()]);
     applyAccent(st.info.settings.accent);
     document.title = `Agendar · ${st.info.settings.businessName}`;
-    const token = new URLSearchParams(location.search).get('r');
     if (token) {
       document.title = `Meu horário · ${st.info.settings.businessName}`;
-      await openManage(token);
+      try {
+        await openManage(token);
+      } catch (err) {
+        if (!isGone(err)) throw err;
+        // O estúdio excluiu o agendamento: tira da lista do aparelho e explica
+        forgetBooking(token);
+        root.innerHTML = `<div class="empty">${icon('calendar')}<h3>Este agendamento não existe mais</h3>
+          <p>Ele pode ter sido removido pelo estúdio. Se quiser, é só marcar um novo horário.</p>
+          <a class="btn btn-primary" href="${location.pathname}">Agendar um horário</a></div>`;
+        return;
+      }
     }
     render();
   } catch (err) {

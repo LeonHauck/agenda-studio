@@ -32,6 +32,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 - 🗓️ Agendamento com **até 60 dias de antecedência** (configurável), com calendário do mês para datas distantes
 - 📲 Atalhos para salvar na agenda do celular e falar com o estúdio pelo WhatsApp
 - 🔁 **Link pessoal** para ver, remarcar ou cancelar o próprio horário (dentro do prazo definido pela dona)
+- 📌 Lista **"Seus horários marcados"** no aparelho da cliente, conferida com o banco a cada visita (some o que foi excluído ou cancelado e atualiza o que foi remarcado)
 
 ### 🔒 Para a dona (painel com login)
 | | Aba | O que faz |
