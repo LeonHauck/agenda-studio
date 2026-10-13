@@ -49,6 +49,7 @@ const API = (() => {
     changeNoticeHours: r.change_notice_hours ?? 2,
     bufferMinutes: r.buffer_minutes ?? 0,
     minLeadMinutes: r.min_lead_minutes ?? 0,
+    maxDaysAhead: r.max_days_ahead ?? 30,
     depositPercent: r.deposit_percent ?? 0,
     depositHours: r.deposit_hours ?? 12,
     pixKey: r.pix_key || '',
@@ -66,6 +67,7 @@ const API = (() => {
     change_notice_hours: s.changeNoticeHours ?? 2,
     buffer_minutes: s.bufferMinutes ?? 0,
     min_lead_minutes: s.minLeadMinutes ?? 0,
+    max_days_ahead: s.maxDaysAhead ?? 60,
     deposit_percent: s.depositPercent ?? 0,
     deposit_hours: s.depositHours ?? 12,
     pix_key: s.pixKey || '',
@@ -74,12 +76,20 @@ const API = (() => {
   });
   const serviceFrom = r => ({
     id: r.id, name: r.name, price: Number(r.price), duration: r.duration, color: r.color, active: r.active, sort: r.sort,
+    returnMin: r.return_min_days || null, returnMax: r.return_max_days || null, returnServiceId: r.return_service_id || null,
   });
   const serviceTo = s => withId(s, {
     name: s.name, price: s.price, duration: s.duration, color: s.color, active: s.active !== false, sort: s.sort || 0,
+    return_min_days: s.returnMin || null, return_max_days: s.returnMax || null, return_service_id: s.returnServiceId || null,
   });
-  const clientFrom = r => ({ id: r.id, name: r.name, phone: r.phone || '', notes: r.notes || '', createdAt: r.created_at });
-  const clientTo = c => withId(c, { name: c.name, phone: c.phone || '', notes: c.notes || '' });
+  const clientFrom = r => ({
+    id: r.id, name: r.name, phone: r.phone || '', notes: r.notes || '', createdAt: r.created_at,
+    returnDays: r.return_days || null, returnRemindedAt: r.return_reminded_at || null,
+  });
+  const clientTo = c => withId(c, {
+    name: c.name, phone: c.phone || '', notes: c.notes || '',
+    return_days: c.returnDays || null, return_reminded_at: c.returnRemindedAt || null,
+  });
   const apptFrom = r => ({
     id: r.id,
     clientId: r.client_id,

@@ -111,6 +111,25 @@ alter table public.settings add column if not exists buffer_minutes int not null
 alter table public.settings drop constraint if exists settings_buffer_check;
 alter table public.settings add constraint settings_buffer_check check (buffer_minutes between 0 and 120);
 
+-- Atualização: até quantos dias à frente a cliente pode agendar
+alter table public.settings add column if not exists max_days_ahead int not null default 60;
+alter table public.settings drop constraint if exists settings_max_days_check;
+alter table public.settings add constraint settings_max_days_check check (max_days_ahead between 7 and 180);
+
+-- Atualização: retorno/manutenção. Cada serviço pode indicar em quantos dias a cliente deve
+-- voltar (janela mínima–máxima) e qual serviço é o retorno; a cliente pode ter um prazo próprio.
+alter table public.services add column if not exists return_min_days int;
+alter table public.services add column if not exists return_max_days int;
+alter table public.services add column if not exists return_service_id uuid references public.services (id) on delete set null;
+alter table public.services drop constraint if exists services_return_check;
+alter table public.services add constraint services_return_check check (
+  (return_min_days is null and return_max_days is null)
+  or (return_min_days between 1 and 365 and return_max_days between return_min_days and 365));
+alter table public.clients add column if not exists return_days int;
+alter table public.clients add column if not exists return_reminded_at timestamptz;
+alter table public.clients drop constraint if exists clients_return_days_check;
+alter table public.clients add constraint clients_return_days_check check (return_days is null or return_days between 1 and 365);
+
 -- Atualização: antecedência mínima para a cliente agendar e sinal por Pix
 alter table public.settings add column if not exists min_lead_minutes int not null default 60;
 alter table public.settings add column if not exists deposit_percent int not null default 50;
@@ -243,7 +262,7 @@ language sql stable security definer set search_path = public as $$
      and not (a.status = 'agendado' and coalesce(a.deposit_amount, 0) > 0
               and a.deposit_paid_at is null and a.deposit_due_at < now())
      and (p_exclude_token is null or a.manage_token <> p_exclude_token)
-     and p_to - p_from <= 62
+     and p_to - p_from <= 190
   union all
   select d::date,
          coalesce(b.start_time, '00:00'),
@@ -254,7 +273,7 @@ language sql stable security definer set search_path = public as $$
    cross join generate_series(greatest(b.start_date, p_from), least(b.end_date, p_to), interval '1 day') as d
    where b.end_date >= p_from and b.start_date <= p_to
      and (b.weekdays is null or extract(dow from d)::int = any (b.weekdays))
-     and p_to - p_from <= 62
+     and p_to - p_from <= 190
 $$;
 
 -- Regras de um horário para a cliente: dia de atendimento, expediente, bloqueios,
@@ -294,8 +313,8 @@ begin
   if p_date + p_start::time < v_now + make_interval(mins => s.min_lead_minutes) then
     raise exception 'Esse horário está muito próximo. Escolha um horário com mais antecedência.';
   end if;
-  if p_date > v_now::date + 60 then
-    raise exception 'Só é possível agendar com até 60 dias de antecedência.';
+  if p_date > v_now::date + s.max_days_ahead then
+    raise exception 'Só é possível agendar com até % dias de antecedência.', s.max_days_ahead;
   end if;
 
   -- Uma reserva por vez para o mesmo dia (evita duas clientes no mesmo horário)

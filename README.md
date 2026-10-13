@@ -29,6 +29,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 - 📅 Somente **horários realmente livres**, que comportam a duração escolhida
 - ✅ Agendamento sem precisar criar conta, confirmado na hora ou mediante **sinal por Pix** (copia e cola)
 - ⏱️ **Antecedência mínima** para agendar, evitando marcações em cima da hora
+- 🗓️ Agendamento com **até 60 dias de antecedência** (configurável), com calendário do mês para datas distantes
 - 📲 Atalhos para salvar na agenda do celular e falar com o estúdio pelo WhatsApp
 - 🔁 **Link pessoal** para ver, remarcar ou cancelar o próprio horário (dentro do prazo definido pela dona)
 
@@ -39,6 +40,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias), período do dia ou **toda semana** (ex.: almoço); o motivo fica visível só para a dona |
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
 | 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago, **número de faltas** e atalho para WhatsApp |
+| 🔁 | **Retornos** | Cada serviço pode ter uma janela de retorno (ex.: manutenção em 20 a 40 dias) e a cliente um prazo próprio; o painel sugere o retorno ao concluir e lista quem está na época de voltar |
 | 💸 | **Sinal por Pix** | Percentual e prazo configuráveis; a dona confirma o recebimento e os não pagos são **cancelados automaticamente**; sinais retidos (falta ou cancelamento) entram no faturamento |
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado (concluídos **e sinais retidos**) × a receber (descontando sinais já pagos); faltas e cancelamentos; gráfico; por serviço e forma de pagamento |
 | ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, **intervalo de limpeza entre clientes** (padrão 15 min), cor do app, link e backup |

@@ -5,7 +5,7 @@
    - Sem parâmetro: agendamento em 3 passos
    - ?r=<código>: a cliente vê, remarca ou cancela o próprio horário
    ============================================================ */
-const HORIZON = 30;       // quantos dias à frente a cliente pode escolher
+const QUICK_DAYS = 14;    // dias mostrados na fila rápida; o restante fica no calendário do mês
 const MAX_SERVICES = 5;
 const REMEMBER_KEY = 'agenda-cliente';   // nome e WhatsApp, para não digitar de novo
 const BOOKINGS_KEY = 'agenda-reservas';  // horários marcados neste aparelho
@@ -14,6 +14,7 @@ const st = {
   mode: 'book', info: null, busy: [],
   // agendamento
   selected: [], date: null, start: null, step: 1, done: null,
+  showCal: false, calMonth: null,
   // gerenciamento pelo link
   token: null, booking: null, view: 'view', confirmCancel: false,
 };
@@ -56,7 +57,9 @@ function depositBox({ amount, dueAt, name, date, start }) {
     ${s.whatsapp ? `<a class="btn btn-ghost btn-wa btn-block" href="${waLink(s.whatsapp, msg)}" target="_blank" rel="noopener">${icon('chat')} Enviar comprovante pelo WhatsApp</a>` : ''}
   </div>`;
 }
-const nextDays = () => Array.from({ length: HORIZON }, (_, i) => dateKey(addDays(new Date(), i)));
+// Até quantos dias à frente a cliente pode agendar (definido pela dona em Ajustes)
+const horizon = () => st.info.settings.maxDaysAhead || 30;
+const nextDays = () => Array.from({ length: horizon() + 1 }, (_, i) => dateKey(addDays(new Date(), i)));
 const manageUrl = token => `${location.origin}${location.pathname}?r=${token}`;
 
 async function refreshBusy() {
@@ -162,8 +165,38 @@ function stepServices() {
     }).join('')}</div>`;
 }
 
+/** Calendário do mês, para escolher datas além da fila rápida. `free` = horários livres por dia. */
+function monthCalendar(days, free) {
+  const first = days[0], last = days[days.length - 1];
+  const month = st.calMonth || (st.date || first).slice(0, 7);
+  const [y, m] = month.split('-').map(Number);
+  const total = new Date(y, m, 0).getDate();
+  const lead = new Date(y, m - 1, 1).getDay();
+  const cells = Array.from({ length: lead }, () => '<span></span>');
+  for (let d = 1; d <= total; d++) {
+    const k = `${month}-${pad(d)}`;
+    const ok = k >= first && k <= last && free[k] > 0;
+    cells.push(`<button class="cal-day ${k === st.date ? 'on' : ''} ${k === todayKey() ? 'today' : ''}" data-action="pick-day" data-date="${k}" ${ok ? '' : 'disabled'}>${d}</button>`);
+  }
+  return `<div class="cal">
+    <div class="cal-head">
+      <button class="icon-btn" data-action="cal-nav" data-dir="-1" aria-label="Mês anterior" ${month <= first.slice(0, 7) ? 'disabled' : ''}>${icon('chevLeft')}</button>
+      <b>${MONTHS[m - 1]} de ${y}</b>
+      <button class="icon-btn" data-action="cal-nav" data-dir="1" aria-label="Próximo mês" ${month >= last.slice(0, 7) ? 'disabled' : ''}>${icon('chevRight')}</button>
+    </div>
+    <div class="cal-grid cal-dow">${['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(x => `<span>${x}</span>`).join('')}</div>
+    <div class="cal-grid">${cells.join('')}</div>
+    <p class="muted small" style="margin:8px 0 0">Dias apagados estão fechados ou sem horário livre.</p>
+  </div>`;
+}
+
 function stepTime({ back, backLabel, title }) {
-  const pills = nextDays().map(k => {
+  const days = nextDays();
+  const free = Object.fromEntries(days.map(k => [k, slotsFor(k).length]));
+  // Fila rápida: os próximos dias, mais o dia escolhido se ele estiver além dela
+  const quick = days.slice(0, QUICK_DAYS);
+  if (st.date && !quick.includes(st.date)) quick.push(st.date);
+  const pills = quick.map(k => {
     const d = parseKey(k);
     const free = slotsFor(k).length;
     const note = !isWorkDay(k) ? 'Fechado' : free ? `${free} livre${free === 1 ? '' : 's'}` : 'Lotado';
@@ -189,6 +222,8 @@ function stepTime({ back, backLabel, title }) {
     <h2 class="pub-title">${title}</h2>
     <p class="pub-sub">Duração total: ${fmtDuration(needDuration())}</p>
     <div class="day-scroll">${pills}</div>
+    ${days.length > QUICK_DAYS ? `<button class="link-btn cal-toggle" data-action="toggle-cal">${icon('calendar')} ${st.showCal ? 'Fechar calendário' : `Ver mais datas (até ${fmtDateShort(days[days.length - 1]).slice(0, 5)})`}</button>` : ''}
+    ${st.showCal ? monthCalendar(days, free) : ''}
     <div class="slot-area">${slotsHtml}</div>`;
 }
 
@@ -419,6 +454,13 @@ const ACTIONS = {
   },
   'go-step': el => goStep(Number(el.dataset.step)),
   'pick-day': el => { st.date = el.dataset.date; st.start = null; render(); },
+  'toggle-cal': () => { st.showCal = !st.showCal; st.calMonth = (st.date || todayKey()).slice(0, 7); render(); },
+  'cal-nav': el => {
+    const [y, m] = (st.calMonth || todayKey().slice(0, 7)).split('-').map(Number);
+    const d = new Date(y, m - 1 + Number(el.dataset.dir), 1);
+    st.calMonth = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    render();
+  },
   'pick-slot': el => { st.start = el.dataset.start; render(); },
   'restart': () => { st.selected = []; st.date = null; st.start = null; st.done = null; goStep(1); },
   'copy-pix': el => copyText(el.dataset.code, 'Código Pix copiado. Cole no app do seu banco.'),

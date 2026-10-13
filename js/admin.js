@@ -58,6 +58,80 @@ const clientCanManage = () => db.settings.changeNoticeHours >= 0;
 // Sinal por Pix: vale quando há percentual e chave cadastrada; "pendente" = a dona ainda não confirmou
 const depositActive = () => db.settings.depositPercent > 0 && Boolean(db.settings.pixKey);
 const pendingDeposit = a => a.status === 'agendado' && a.depositAmount > 0 && !a.depositPaidAt;
+/* ---------- Retorno / manutenção ---------- */
+const svcById = id => db.services.find(x => x.id === id);
+const addDaysKey = (k, n) => dateKey(addDays(parseKey(k), n));
+const daysBetween = (a, b) => Math.round((parseKey(b) - parseKey(a)) / 86400000);
+
+// Regra de retorno de um atendimento: a do serviço com o menor prazo.
+// Se a cliente tem um prazo próprio, ele substitui a janela do serviço.
+function returnRule(appt) {
+  const withRule = appt.services.map(x => svcById(x.serviceId)).filter(x => x && x.returnMin);
+  if (!withRule.length) return null;
+  const from = withRule.sort((a, b) => a.returnMin - b.returnMin)[0];
+  const own = db.clients.find(c => c.id === appt.clientId)?.returnDays;
+  return {
+    from,
+    service: svcById(from.returnServiceId) || from,
+    min: own || from.returnMin,
+    max: own || from.returnMax,
+    target: own || Math.round((from.returnMin + from.returnMax) / 2),
+  };
+}
+
+// Situação de retorno de uma cliente; nulo se não se aplica ou se ela já tem horário marcado
+function clientReturn(c) {
+  const mine = db.appointments.filter(a => a.clientId === c.id);
+  const tk = todayKey();
+  if (mine.some(a => isActive(a) && a.status !== 'concluido' && a.date >= tk)) return null;
+  const last = mine.filter(a => a.status === 'concluido')
+    .sort((x, y) => (y.date + y.start).localeCompare(x.date + x.start))
+    .find(a => returnRule(a));
+  if (!last) return null;
+  const rule = returnRule(last);
+  return {
+    client: c, last, rule,
+    days: daysBetween(last.date, tk),
+    opens: addDaysKey(last.date, rule.min),
+    closes: addDaysKey(last.date, rule.max),
+    target: addDaysKey(last.date, rule.target),
+  };
+}
+
+// Clientes na época do retorno: de 5 dias antes da janela até 60 dias depois
+function dueReturns() {
+  return db.clients.map(clientReturn)
+    .filter(r => r && r.days >= r.rule.min - 5 && r.days <= r.rule.max + 60)
+    .sort((a, b) => b.days - a.days);
+}
+const remindedRecently = c => c.returnRemindedAt && Date.now() - Date.parse(c.returnRemindedAt) < 7 * 86400000;
+
+// Próximo dia de atendimento a partir de uma data (pula folgas e dias bloqueados)
+function nextOpenDay(k) {
+  let day = k < todayKey() ? addDaysKey(todayKey(), 1) : k;
+  for (let i = 0; i < 21 && (!isWorkDay(day) || fullDayBlock(day)); i++) day = addDaysKey(day, 1);
+  return day;
+}
+
+function returnWindowText(r) {
+  const d = k => fmtDateShort(k).slice(0, 5);
+  return r.rule.min === r.rule.max ? `por volta de ${d(r.target)}` : `entre ${d(r.opens)} e ${d(r.closes)}`;
+}
+
+function openReturnForm(r) {
+  openApptForm(null, { clientId: r.client.id, date: nextOpenDay(r.target), serviceIds: [r.rule.service.id] });
+}
+
+async function offerReturn(saved) {
+  const c = db.clients.find(x => x.id === saved.clientId);
+  const r = c && clientReturn(c);
+  if (!r || r.last.id !== saved.id) return;
+  const ok = await confirmDialog(
+    `Sugestão: ${r.rule.service.name}, ${returnWindowText(r)}. Você escolhe o dia e o horário na próxima tela.`,
+    { title: `Agendar o retorno de ${firstName(c.name)}?`, ok: 'Agendar retorno' });
+  if (ok) openReturnForm(r);
+}
+
 // Sinal retido: a dona confirmou o recebimento e o atendimento não aconteceu (falta ou cancelamento)
 const retainedDeposit = a => (FREES_SLOT.includes(a.status) && a.depositPaidAt ? a.depositAmount : 0);
 // Sinal já recebido de um atendimento que ainda vai acontecer (desconta do "a receber")
@@ -368,6 +442,7 @@ function renderAgenda() {
     </section>
 
     ${depositBanner()}
+    ${returnsBanner()}
     ${reminderBanner()}
 
     <section class="stats">
@@ -539,6 +614,19 @@ function openServiceForm(svc) {
         <span class="label">Cor na agenda</span>
         <div class="swatches">${PALETTE.map(c => `<label><input type="radio" name="color" value="${c}"><span style="background:${c}"></span></label>`).join('')}</div>
       </div>
+      <div class="field">
+        <span class="label">Retorno / manutenção <span class="muted">(opcional)</span></span>
+        <div class="row">
+          <div class="field"><label for="s-ret-min" class="sub-label">A partir de (dias)</label><input id="s-ret-min" type="number" inputmode="numeric" min="1" max="365" placeholder="Ex.: 20"></div>
+          <div class="field"><label for="s-ret-max" class="sub-label">Até (dias)</label><input id="s-ret-max" type="number" inputmode="numeric" min="1" max="365" placeholder="Ex.: 40"></div>
+        </div>
+        <label for="s-ret-svc" class="sub-label" style="margin-top:6px">Serviço do retorno</label>
+        <select id="s-ret-svc">
+          <option value="">Este mesmo serviço</option>
+          ${db.services.filter(x => x.id !== s.id).map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}
+        </select>
+        <small class="muted small">Ex.: alongamento em gel, com retorno entre 20 e 40 dias para manutenção. O painel sugere o retorno ao concluir o atendimento e avisa quando a cliente está na época de voltar.</small>
+      </div>
       <label class="switch">
         <span><b>Disponível no agendamento online</b><small>Se desligado, só você pode agendar este serviço.</small></span>
         <input type="checkbox" id="s-active">
@@ -555,6 +643,9 @@ function openServiceForm(svc) {
       $('#s-name').value = s.name;
       $('#s-price').value = s.price === '' ? '' : Number(s.price).toFixed(2);
       $('#s-active').checked = s.active !== false;
+      $('#s-ret-min').value = s.returnMin || '';
+      $('#s-ret-max').value = s.returnMax || '';
+      $('#s-ret-svc').value = s.returnServiceId || '';
       dur.value = s.duration;
       const colorInput = $(`input[name=color][value="${s.color}"]`, f) || $('input[name=color]', f);
       colorInput.checked = true;
@@ -577,7 +668,14 @@ function openServiceForm(svc) {
         if (!name) return toast('Informe o nome do serviço.');
         if (!Number.isFinite(price) || price < 0 || $('#s-price').value === '') return toast('Informe um valor válido.');
         if (!duration || duration < 5) return toast('A duração mínima é de 5 minutos.');
-        const record = { ...s, name, price, duration, color: $('input[name=color]:checked', f).value, active: $('#s-active').checked };
+        const retMin = Math.round(Number($('#s-ret-min').value)) || null;
+        const retMax = Math.round(Number($('#s-ret-max').value)) || retMin;
+        if (retMin && (retMin < 1 || retMax > 365 || retMax < retMin)) return toast('No retorno, o "até" deve ser maior ou igual ao "a partir de" (máximo 365 dias).');
+        if (!retMin && $('#s-ret-max').value) return toast('Informe também o "a partir de" do retorno.');
+        const record = {
+          ...s, name, price, duration, color: $('input[name=color]:checked', f).value, active: $('#s-active').checked,
+          returnMin: retMin, returnMax: retMin ? retMax : null, returnServiceId: retMin ? $('#s-ret-svc').value || null : null,
+        };
         await withBusy($('.sheet-foot [type=submit]'), async () => {
           putLocal('services', await API.saveService(record));
           closeSheet();
@@ -661,6 +759,7 @@ function openClientForm(client) {
     : [];
   const done = appts.filter(a => a.status === 'concluido');
   const { count, last, noShows } = isEdit ? clientSummary(c) : { count: 0, last: null, noShows: 0 };
+  const ret = isEdit ? clientReturn(c) : null;
 
   const header = isEdit ? `
     <div class="quick-actions">
@@ -669,6 +768,8 @@ function openClientForm(client) {
         ? `<a class="btn btn-ghost btn-wa" href="${waLink(c.phone, `Olá, ${firstName(c.name)}!`)}" target="_blank" rel="noopener">${icon('chat')} WhatsApp</a>`
         : `<button type="button" class="btn btn-ghost" disabled>${icon('chat')} Sem telefone</button>`}
     </div>
+    ${ret ? `<div class="notice-soft">${icon('repeat')}<span><b>Retorno indicado:</b> ${esc(ret.rule.service.name)}, ${returnWindowText(ret)} (último atendimento há ${ret.days} dia${ret.days === 1 ? '' : 's'}).<br>
+      <button type="button" class="link-btn" style="margin-top:6px" data-action="book-return" data-id="${c.id}">Agendar retorno</button></span></div>` : ''}
     <div class="mini-stats">
       <div><span>Atendimentos</span><strong>${count}</strong></div>
       <div><span>Total pago</span><strong>${money(sum(done, a => a.price) + sum(appts, retainedDeposit))}</strong></div>
@@ -691,6 +792,11 @@ function openClientForm(client) {
         <div class="field"><label for="c-name">Nome</label><input id="c-name" maxlength="80" placeholder="Nome completo"></div>
         <div class="field"><label for="c-phone">WhatsApp / telefone</label><input id="c-phone" type="tel" inputmode="tel" placeholder="(00) 00000-0000"></div>
         <div class="field"><label for="c-notes">Observações</label><textarea id="c-notes" rows="2" placeholder="Preferências, alergias, cores favoritas…"></textarea></div>
+        <div class="field">
+          <label for="c-return">Retorno a cada (dias) <span class="muted">(opcional)</span></label>
+          <input id="c-return" type="number" inputmode="numeric" min="1" max="365" placeholder="Usar o prazo do serviço">
+          <small class="muted small">Preencha só se esta cliente precisa voltar num prazo diferente do padrão do serviço.</small>
+        </div>
       </form>
       ${history}
     </div>`,
@@ -702,6 +808,7 @@ function openClientForm(client) {
       $('#c-name').value = c.name;
       $('#c-phone').value = c.phone || '';
       $('#c-notes').value = c.notes || '';
+      $('#c-return').value = c.returnDays || '';
       bindPhoneMask($('#c-phone'));
 
       $('#client-form').addEventListener('submit', async e => {
@@ -713,7 +820,8 @@ function openClientForm(client) {
           return toast('Já existe uma cliente com esse nome.');
         }
         await withBusy($('.sheet-foot [type=submit]'), async () => {
-          const saved = await API.saveClient({ ...c, name, phone, notes: $('#c-notes').value.trim() });
+          const returnDays = Math.min(Math.max(Math.round(Number($('#c-return').value)) || 0, 0), 365) || null;
+          const saved = await API.saveClient({ ...c, name, phone, notes: $('#c-notes').value.trim(), returnDays });
           putLocal('clients', saved);
           if (isEdit && (name !== client.name || phone !== client.phone)) {
             await API.renameClientAppointments(saved.id, name, phone);
@@ -779,7 +887,7 @@ function openApptForm(appt, preset = {}) {
       options.push({ id: s.serviceId, name: s.name, price: s.price, duration: s.duration, color: s.color });
     }
   });
-  const selected = new Set(a.services.map(s => s.serviceId));
+  const selected = new Set([...a.services.map(s => s.serviceId), ...(preset.serviceIds || [])]);
 
   const servicesHtml = options.length
     ? `<div class="chips">${options.map(o => `
@@ -1015,7 +1123,10 @@ function openApptForm(appt, preset = {}) {
         ui.date = date;
         render();
         toast(isEdit ? 'Agendamento atualizado' : `Agendado para ${fmtDateShort(date).slice(0, 5)} às ${start}`);
-        if (isEdit) offerChangeNotice(appt, saved);
+        if (isEdit) {
+          await offerChangeNotice(appt, saved);
+          if (appt.status !== 'concluido' && saved.status === 'concluido') offerReturn(saved);
+        }
       });
 
       $('#f-del')?.addEventListener('click', async e => {
@@ -1053,6 +1164,66 @@ async function offerChangeNotice(before, after) {
   }
   const ok = await confirmDialog(`Vamos abrir o WhatsApp com uma mensagem pronta para ${after.clientName}.`, { title, ok: 'Abrir WhatsApp' });
   if (ok) window.open(waLink(after.phone, text), '_blank', 'noopener');
+}
+
+/* ============================================================
+   Retornos: clientes na época da manutenção, sem horário marcado
+   ============================================================ */
+function returnsBanner() {
+  const list = dueReturns().filter(r => !remindedRecently(r.client));
+  if (!list.length) return '';
+  return `<button class="reminder-banner is-return" data-action="open-returns">
+    ${icon('repeat')}
+    <div><b>${list.length} cliente${list.length === 1 ? '' : 's'} na época do retorno</b><span>Sem horário marcado · chame pelo WhatsApp</span></div>
+    <span class="block-edit">Ver</span>
+  </button>`;
+}
+
+function returnMessage(r) {
+  const until = r.rule.min === r.rule.max ? `por volta de ${fmtDateLong(r.target)}` : `até ${fmtDateLong(r.closes)}`;
+  return `Olá, ${firstName(r.client.name)}! Já faz ${r.days} dias do seu último atendimento (${r.last.services.map(x => x.name).join(' + ')}). ` +
+    `O retorno indicado (${r.rule.service.name}) é ${until}. Quer garantir seu horário? É só agendar por aqui: ${publicUrl()}`;
+}
+
+function openReturns() {
+  const rowHtml = r => {
+    const c = r.client;
+    const state = r.days > r.rule.max ? `<b class="late">passou ${r.days - r.rule.max} dia${r.days - r.rule.max === 1 ? '' : 's'} do prazo</b>`
+      : r.days < r.rule.min ? `janela abre em ${r.rule.min - r.days} dia${r.rule.min - r.days === 1 ? '' : 's'}` : 'dentro da janela';
+    return `<div class="rem-row" data-row="${c.id}">
+      <div class="h-main"><strong>${esc(c.name)}</strong>
+        <span>${esc(r.rule.service.name)} · há ${r.days} dias · ${state}${remindedRecently(c) ? ' · <b class="sent">Avisada ✓</b>' : ''}</span></div>
+      <div class="rem-actions">
+        ${c.phone ? `<a class="btn btn-sm ${remindedRecently(c) ? 'btn-ghost' : 'btn-primary'}" data-ret="${c.id}" href="${waLink(c.phone, returnMessage(r))}" target="_blank" rel="noopener">${icon('chat')}</a>` : ''}
+        <button type="button" class="btn btn-sm btn-ghost" data-action="book-return" data-id="${c.id}">Agendar</button>
+      </div>
+    </div>`;
+  };
+  const list = dueReturns();
+  openSheet({
+    title: 'Clientes na época do retorno',
+    body: `<div class="stack">
+      <p class="notice-soft">${icon('repeat')}<span>Clientes que fizeram um serviço com retorno e ainda não têm horário marcado. O botão do WhatsApp abre a mensagem pronta, com o link de agendamento.</span></p>
+      <div class="rem-list" id="ret-list">${list.length ? list.map(rowHtml).join('') : '<p class="muted small" style="margin:8px 0 0">Nenhuma cliente na época do retorno.</p>'}</div>
+    </div>`,
+    footer: '<span class="spacer"></span><button type="button" class="btn btn-primary" data-action="close-sheet">Concluir</button>',
+    onMount() {
+      // O link abre o WhatsApp normalmente; em paralelo, registra que a cliente foi avisada
+      $('#ret-list').addEventListener('click', async e => {
+        const btn = e.target.closest('[data-ret]');
+        if (!btn) return;
+        const c = db.clients.find(x => x.id === btn.dataset.ret);
+        try {
+          putLocal('clients', await API.saveClient({ ...c, returnRemindedAt: new Date().toISOString() }));
+          const r = clientReturn(db.clients.find(x => x.id === c.id));
+          if (r) $(`[data-row="${c.id}"]`).outerHTML = rowHtml(r);
+          render();
+        } catch (err) {
+          console.error(err);
+        }
+      });
+    },
+  });
 }
 
 /* ============================================================
@@ -1640,6 +1811,13 @@ function renderSettings() {
           <small class="muted small">Tempo reservado depois de cada cliente para limpeza e esterilização. ${s.bufferMinutes ? `Ex.: atendimento das 10:00 às 11:00 → próximo horário a partir das ${fromMin(660 + Number(s.bufferMinutes))}.` : 'Sem intervalo, o próximo horário começa logo que o anterior termina.'}</small>
         </div>
         <div class="field">
+          <label for="set-maxdays">A cliente pode agendar com até</label>
+          <select id="set-maxdays" data-setting="maxDaysAhead">${[30, 45, 60, 90, 120].map(v =>
+            `<option value="${v}" ${s.maxDaysAhead === v ? 'selected' : ''}>${v} dias de antecedência</option>`).join('')}
+          </select>
+          <small class="muted small">Até onde o calendário do link fica aberto. Útil para serviços marcados com bastante antecedência, como alongamento.</small>
+        </div>
+        <div class="field">
           <label for="set-lead">Antecedência mínima para a cliente agendar</label>
           <select id="set-lead" data-setting="minLeadMinutes">${LEAD_OPTIONS.map(([v, label]) =>
             `<option value="${v}" ${s.minLeadMinutes === v ? 'selected' : ''}>${label}</option>`).join('')}
@@ -1788,7 +1966,7 @@ async function onSettingChange(el) {
   const s = db.settings;
   if (key === 'workDays') {
     s.workDays = $$('[data-setting=workDays]:checked').map(i => Number(i.value)).sort();
-  } else if (key === 'minLeadMinutes' || key === 'depositPercent' || key === 'depositHours') {
+  } else if (key === 'minLeadMinutes' || key === 'depositPercent' || key === 'depositHours' || key === 'maxDaysAhead') {
     s[key] = Number(el.value);
   } else if (key === 'pixKey' || key === 'pixType') {
     s.pixKey = normalizePixKey($('#set-pix-type').value, $('#set-pix-key').value);
@@ -1927,6 +2105,12 @@ const ACTIONS = {
   'close-sheet': el => { closeSheet(); if (el.getAttribute('href')) location.hash = el.getAttribute('href'); },
   'open-reminders': () => openReminders(),
   'open-deposits': () => openDeposits(),
+  'open-returns': () => openReturns(),
+  'book-return': el => {
+    const c = db.clients.find(x => x.id === el.dataset.id);
+    const r = c && clientReturn(c);
+    if (r) openReturnForm(r);
+  },
   'refund-deposit': async el => {
     const a = db.appointments.find(x => x.id === el.dataset.id);
     if (!a) return;
