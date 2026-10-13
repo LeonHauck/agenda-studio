@@ -58,6 +58,10 @@ const clientCanManage = () => db.settings.changeNoticeHours >= 0;
 // Sinal por Pix: vale quando há percentual e chave cadastrada; "pendente" = a dona ainda não confirmou
 const depositActive = () => db.settings.depositPercent > 0 && Boolean(db.settings.pixKey);
 const pendingDeposit = a => a.status === 'agendado' && a.depositAmount > 0 && !a.depositPaidAt;
+// Sinal retido: a dona confirmou o recebimento e o atendimento não aconteceu (falta ou cancelamento)
+const retainedDeposit = a => (FREES_SLOT.includes(a.status) && a.depositPaidAt ? a.depositAmount : 0);
+// Sinal já recebido de um atendimento que ainda vai acontecer (desconta do "a receber")
+const advanceDeposit = a => (a.depositPaidAt ? Math.min(a.depositAmount, a.price) : 0);
 const pendingDeposits = () => db.appointments.filter(pendingDeposit)
   .sort((x, y) => String(x.depositDueAt || '').localeCompare(String(y.depositDueAt || '')));
 // Trecho com o link de remarcar/cancelar, para anexar às mensagens de WhatsApp
@@ -664,7 +668,7 @@ function openClientForm(client) {
     </div>
     <div class="mini-stats">
       <div><span>Atendimentos</span><strong>${count}</strong></div>
-      <div><span>Total pago</span><strong>${money(sum(done, a => a.price))}</strong></div>
+      <div><span>Total pago</span><strong>${money(sum(done, a => a.price) + sum(appts, retainedDeposit))}</strong></div>
       <div><span>Última visita</span><strong>${last ? fmtDateShort(last).slice(0, 5) : '—'}</strong></div>
       <div class="${noShows ? 'is-warn' : ''}"><span>Faltas</span><strong>${noShows}</strong></div>
     </div>` : '';
@@ -736,10 +740,11 @@ function openClientForm(client) {
 
 function historyRow(a, showYear) {
   const date = showYear ? fmtDateShort(a.date) : fmtDateShort(a.date).slice(0, 5);
-  const pay = a.status === 'concluido' && a.payment ? ` · ${PAYMENTS[a.payment]}` : '';
+  const kept = retainedDeposit(a);
+  const pay = a.status === 'concluido' && a.payment ? ` · ${PAYMENTS[a.payment]}` : kept ? ' · sinal retido' : '';
   return `<button type="button" data-action="edit-appt" data-id="${a.id}">
     <div class="h-main"><strong>${date} · ${a.start}</strong><span>${esc(a.services.map(s => s.name).join(' + '))}${pay}</span></div>
-    <div class="h-side">${money(a.price)}<span class="badge st-${a.status}">${STATUS[a.status]?.label || ''}</span></div>
+    <div class="h-side">${money(kept || a.price)}<span class="badge st-${a.status}">${STATUS[a.status]?.label || ''}</span></div>
   </button>`;
 }
 
@@ -797,7 +802,10 @@ function openApptForm(appt, preset = {}) {
       ? `<div class="notice">${icon('pix')}<p><b>Aguardando sinal de ${money(a.depositAmount)}</b>${a.depositDueAt ? ` · prazo até ${fmtDateTime(a.depositDueAt)}` : ''}. Sem a confirmação, o horário é cancelado automaticamente.<br>
           <button type="button" class="btn btn-primary btn-sm" style="margin-top:8px" data-action="confirm-deposit" data-id="${a.id}">${icon('check')} Confirmar sinal recebido</button></p></div>`
       : a.depositPaidAt
-        ? `<p class="notice-soft">${icon('pix')}<span>Sinal de <b>${money(a.depositAmount)}</b> recebido em ${fmtDateTime(a.depositPaidAt)}. Restante a receber: <b>${money(Math.max(a.price - a.depositAmount, 0))}</b>.</span></p>`
+        ? (FREES_SLOT.includes(a.status)
+          ? `<div class="notice-soft">${icon('pix')}<span>Sinal de <b>${money(a.depositAmount)}</b> recebido em ${fmtDateTime(a.depositPaidAt)} e <b>retido</b>: conta como faturado nas Finanças.<br>
+              <button type="button" class="link-btn" style="margin-top:6px" data-action="refund-deposit" data-id="${a.id}">Marquei que devolvi o sinal</button></span></div>`
+          : `<p class="notice-soft">${icon('pix')}<span>Sinal de <b>${money(a.depositAmount)}</b> recebido em ${fmtDateTime(a.depositPaidAt)}. Restante a receber: <b>${money(Math.max(a.price - a.depositAmount, 0))}</b>.</span></p>`)
         : '';
   const origin = isEdit && a.source === 'online'
     ? `<p class="notice-soft">${icon('globe')} Agendado pela cliente pelo link${a.createdAt ? ` em ${fmtDateShort(a.createdAt.slice(0, 10))}` : ''}. Você pode alterar qualquer informação.</p>`
@@ -1383,7 +1391,9 @@ function renderFinance() {
   const noShows = inRange.filter(a => a.status === 'faltou');
   const lost = [...cancelled, ...noShows];
   const overdue = pending.filter(a => a.date < tk || (a.date === tk && toMin(a.start) + a.duration <= nowMinutes()));
-  const billed = sum(done, a => a.price);
+  const retained = sum(lost, retainedDeposit);          // sinais de quem faltou ou cancelou
+  const advance = sum(pending, advanceDeposit);          // sinais já pagos de atendimentos futuros
+  const billed = sum(done, a => a.price) + retained;
   const isCurrent = tk >= from && tk <= to;
 
   const tabs = Object.entries(PERIODS)
@@ -1406,22 +1416,22 @@ function renderFinance() {
     </section>
 
     <section class="stats stats-4">
-      <div class="stat"><span>Faturado</span><strong>${moneyShort(billed)}</strong><small>${done.length} concluído${done.length === 1 ? '' : 's'}</small></div>
-      <div class="stat"><span>A receber</span><strong>${moneyShort(sum(pending, a => a.price))}</strong><small>${pending.length} pendente${pending.length === 1 ? '' : 's'}</small></div>
-      <div class="stat"><span>Ticket médio</span><strong>${done.length ? moneyShort(billed / done.length) : '—'}</strong><small>por atendimento</small></div>
-      <div class="stat"><span>Faltas · cancelados</span><strong>${noShows.length} · ${cancelled.length}</strong><small>${lost.length ? `${moneyShort(sum(lost, a => a.price))} perdidos` : 'nenhum'}</small></div>
+      <div class="stat"><span>Faturado</span><strong>${moneyShort(billed)}</strong><small>${done.length} concluído${done.length === 1 ? '' : 's'}${retained ? ` + ${moneyShort(retained)} de sinal retido` : ''}</small></div>
+      <div class="stat"><span>A receber</span><strong>${moneyShort(sum(pending, a => a.price) - advance)}</strong><small>${pending.length} pendente${pending.length === 1 ? '' : 's'}${advance ? ` · ${moneyShort(advance)} já em sinais` : ''}</small></div>
+      <div class="stat"><span>Ticket médio</span><strong>${done.length ? moneyShort(sum(done, a => a.price) / done.length) : '—'}</strong><small>por atendimento</small></div>
+      <div class="stat"><span>Faltas · cancelados</span><strong>${noShows.length} · ${cancelled.length}</strong><small>${lost.length ? `${moneyShort(sum(lost, a => a.price) - retained)} perdidos` : 'nenhum'}</small></div>
     </section>
 
     ${overdue.length ? `<div class="notice">${icon('alert')}<p><b>${overdue.length} atendimento${overdue.length === 1 ? '' : 's'} já passou e não foi marcado como concluído.</b> Eles aparecem em "A receber" até você mudar o status na agenda.</p></div>` : ''}
 
     ${period === 'dia' ? '' : `<section class="card pad">
       <h2>Faturamento por dia</h2>
-      ${financeChart(range, active)}
+      ${financeChart(range, active, lost)}
     </section>`}
 
     <section class="card pad">
       <h2>Recebido por forma de pagamento</h2>
-      ${paymentBreakdown(done)}
+      ${paymentBreakdown(done, lost)}
     </section>
 
     <section class="card pad">
@@ -1437,7 +1447,7 @@ function renderFinance() {
   </div>`;
 }
 
-function financeChart(range, appts) {
+function financeChart(range, appts, lost = []) {
   const tk = todayKey();
   const days = [];
   for (let d = new Date(range.start); d <= range.end; d = addDays(d, 1)) days.push(dateKey(d));
@@ -1447,8 +1457,9 @@ function financeChart(range, appts) {
     const list = appts.filter(a => a.date === k);
     return {
       k,
-      done: sum(list.filter(a => a.status === 'concluido'), a => a.price),
-      pending: sum(list.filter(a => a.status !== 'concluido'), a => a.price),
+      // Concluídos + sinais retidos do dia; pendentes já descontam o sinal pago
+      done: sum(list.filter(a => a.status === 'concluido'), a => a.price) + sum(lost.filter(a => a.date === k), retainedDeposit),
+      pending: sum(list.filter(a => a.status !== 'concluido'), a => a.price - advanceDeposit(a)),
     };
   });
   const max = Math.max(...data.map(x => x.done + x.pending));
@@ -1508,9 +1519,11 @@ function meterRows(list, note) {
   ${note ? `<p class="muted small" style="margin:14px 0 0">${note}</p>` : ''}`;
 }
 
-function paymentBreakdown(done) {
-  if (!done.length) return '<p class="muted small" style="margin:0">Nenhum atendimento concluído neste período.</p>';
+function paymentBreakdown(done, lost = []) {
+  const kept = lost.filter(a => retainedDeposit(a) > 0);
+  if (!done.length && !kept.length) return '<p class="muted small" style="margin:0">Nenhum atendimento concluído neste período.</p>';
   const rows = {};
+  if (kept.length) rows.sinal = { name: 'Sinais retidos (Pix)', count: kept.length, value: sum(kept, retainedDeposit) };
   done.forEach(a => {
     const key = a.payment || 'nao';
     const r = rows[key] || (rows[key] = { name: PAYMENTS[key] || 'Não informado', count: 0, value: 0 });
@@ -1520,7 +1533,8 @@ function paymentBreakdown(done) {
   const missing = rows.nao?.count || 0;
   return meterRows(
     Object.values(rows).sort((x, y) => y.value - x.value),
-    missing ? `${missing} atendimento${missing === 1 ? '' : 's'} sem forma de pagamento informada.` : 'Considera apenas atendimentos concluídos.',
+    missing ? `${missing} atendimento${missing === 1 ? '' : 's'} sem forma de pagamento informada.`
+      : kept.length ? 'Considera atendimentos concluídos e sinais retidos de faltas ou cancelamentos.' : 'Considera apenas atendimentos concluídos.',
   );
 }
 
@@ -1910,6 +1924,18 @@ const ACTIONS = {
   'close-sheet': el => { closeSheet(); if (el.getAttribute('href')) location.hash = el.getAttribute('href'); },
   'open-reminders': () => openReminders(),
   'open-deposits': () => openDeposits(),
+  'refund-deposit': async el => {
+    const a = db.appointments.find(x => x.id === el.dataset.id);
+    if (!a) return;
+    const ok = await confirmDialog(`O sinal de ${money(a.depositAmount)} deixa de contar como faturado. Use isso depois de devolver o valor para a cliente.`, { title: 'Marcar o sinal como devolvido?', ok: 'Marcar como devolvido' });
+    if (!ok) return;
+    await withBusy(el, async () => {
+      putLocal('appointments', await API.saveAppointment({ ...a, depositPaidAt: null }));
+      closeSheet();
+      render();
+      toast('Sinal marcado como devolvido');
+    });
+  },
   'confirm-deposit': el => confirmDeposit(el.dataset.id, el),
   'copy-pix-test': () => {
     const st = db.settings;
