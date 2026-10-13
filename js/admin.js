@@ -119,7 +119,10 @@ function showLogin(message = '', email = '') {
       <div class="field"><label for="l-email">E-mail</label><input id="l-email" type="email" autocomplete="username" required></div>
       <div class="field">
         <div class="label-row"><label for="l-pass">Senha</label><button type="button" class="link-btn" data-action="forgot-password">Esqueci minha senha</button></div>
-        <input id="l-pass" type="password" autocomplete="current-password" required>
+        <div class="pass-wrap">
+          <input id="l-pass" type="password" autocomplete="current-password" required>
+          <button type="button" class="pass-toggle" data-action="toggle-pass" data-target="l-pass" aria-label="Mostrar senha" aria-pressed="false">${icon('eye')}</button>
+        </div>
       </div>
       ${message ? `<p class="hint warn" style="margin:0">${esc(message)}</p>` : ''}
       <button class="btn btn-primary btn-block" type="submit">Entrar</button>
@@ -1982,6 +1985,16 @@ const ACTIONS = {
     }
   },
   'export': exportData,
+  // Mostra ou esconde a senha digitada (ajuda a achar erros de digitação)
+  'toggle-pass': el => {
+    const input = $(`#${el.dataset.target}`);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    el.innerHTML = icon(show ? 'eyeOff' : 'eye');
+    el.setAttribute('aria-label', show ? 'Esconder senha' : 'Mostrar senha');
+    el.setAttribute('aria-pressed', String(show));
+    input.focus();
+  },
   'forgot-password': el => showForgotPassword(el.dataset.email || $('#l-email')?.value.trim() || ''),
   'back-to-login': el => showLogin('', el.dataset.email || ''),
   'change-password': () => openSheet({

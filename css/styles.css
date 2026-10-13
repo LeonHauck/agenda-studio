@@ -570,6 +570,14 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .auth-loading .i, .pub-loading .i { width: 32px; height: 32px; color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
 
+.pass-wrap { position: relative; }
+.pass-wrap input { padding-right: 48px !important; }
+.pass-toggle {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%);
+  width: 38px; height: 38px; display: grid; place-items: center;
+  border: 0; border-radius: 10px; background: none; color: var(--muted);
+}
+.pass-toggle:hover { color: var(--text); background: var(--surface-2); }
 .label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .label-row label { font-size: 13px; font-weight: 600; color: var(--muted); }
 .link-plain { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: 13px; }
