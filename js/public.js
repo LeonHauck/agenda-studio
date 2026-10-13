@@ -188,8 +188,53 @@ function stepServices() {
     }).join('')}</div>`;
 }
 
-/** Calendário do mês, para escolher datas além da fila rápida. `free` = horários livres por dia. */
-function monthCalendar(days, free) {
+/* ---------- Encaixe: horários dentro da antecedência mínima são combinados pelo WhatsApp ---------- */
+const leadMinutes = () => st.info.settings.minLeadMinutes || 0;
+// Horários que existiriam sem a regra de antecedência (para saber se o dia só tem "encaixe")
+const slotsIgnoringLead = k => (isWorkDay(k) ? computeSlots(st.info.settings, st.busy, k, needDuration(), null, 0) : []);
+
+function leadLabel(min) {
+  if (min < 60) return `nos próximos ${min} minutos`;
+  const h = Math.round(min / 60);
+  return h === 1 ? 'na próxima hora' : `nas próximas ${h} horas`;
+}
+
+function rushMessage(dayKey) {
+  const saved = readStore(REMEMBER_KEY, {});
+  const who = st.mode === 'manage' ? st.booking.name : saved.name;
+  const what = st.mode === 'manage'
+    ? st.booking.services.map(x => x.name).join(' + ')
+    : selectedServices().map(x => x.name).join(' + ');
+  const when = !dayKey ? 'o quanto antes'
+    : dayKey === todayKey() ? 'hoje'
+    : dayKey === dateKey(addDays(new Date(), 1)) ? 'amanhã'
+    : `em ${fmtDateLong(dayKey)}`;
+  return `Olá! Gostaria de um encaixe ${when}${what ? ` para ${what}` : ''}. Tem disponibilidade?${who ? ` Meu nome é ${who}.` : ''}`;
+}
+
+/** Aviso de encaixe. `full` = quadro grande (o dia escolhido só tem encaixe); senão, linha discreta. */
+function rushNotice(dayKey, full) {
+  const s = st.info.settings;
+  const lead = leadMinutes();
+  if (!lead) return '';
+  const button = s.whatsapp
+    ? `<a class="btn ${full ? 'btn-primary btn-block' : 'btn-ghost btn-sm'} btn-wa-solid" href="${waLink(s.whatsapp, rushMessage(dayKey))}" target="_blank" rel="noopener">${icon('chat')} Pedir encaixe pelo WhatsApp</a>`
+    : '';
+  if (full) {
+    return `<div class="rush-box">
+      <b>${icon('clock')} Horário de encaixe</b>
+      <p>Horários ${leadLabel(lead)} são combinados direto com o estúdio, conforme a agenda e a disponibilidade.${s.whatsapp ? '' : ' Entre em contato com o estúdio.'}</p>
+      ${button}
+    </div>`;
+  }
+  return `<div class="rush-line">
+    <span>${icon('clock')} Precisa de um horário ${leadLabel(lead)}? Encaixes são combinados direto com o estúdio.</span>
+    ${button}
+  </div>`;
+}
+
+/** Calendário do mês, para escolher datas além da fila rápida. `info[k]` = { free, rush } de cada dia. */
+function monthCalendar(days, info) {
   const first = days[0], last = days[days.length - 1];
   const month = st.calMonth || (st.date || first).slice(0, 7);
   const [y, m] = month.split('-').map(Number);
@@ -198,7 +243,7 @@ function monthCalendar(days, free) {
   const cells = Array.from({ length: lead }, () => '<span></span>');
   for (let d = 1; d <= total; d++) {
     const k = `${month}-${pad(d)}`;
-    const ok = k >= first && k <= last && free[k] > 0;
+    const ok = info[k] && (info[k].free > 0 || info[k].rush);
     cells.push(`<button class="cal-day ${k === st.date ? 'on' : ''} ${k === todayKey() ? 'today' : ''}" data-action="pick-day" data-date="${k}" ${ok ? '' : 'disabled'}>${d}</button>`);
   }
   return `<div class="cal">
@@ -215,21 +260,31 @@ function monthCalendar(days, free) {
 
 function stepTime({ back, backLabel, title }) {
   const days = nextDays();
-  const free = Object.fromEntries(days.map(k => [k, slotsFor(k).length]));
+  const lead = leadMinutes();
+  // Para cada dia: horários livres e se o dia só tem horários dentro do prazo de encaixe
+  const info = Object.fromEntries(days.map(k => {
+    const free = slotsFor(k).length;
+    return [k, { free, rush: !free && lead > 0 && slotsIgnoringLead(k).length > 0 }];
+  }));
+
   // Fila rápida: os próximos dias, mais o dia escolhido se ele estiver além dela
   const quick = days.slice(0, QUICK_DAYS);
   if (st.date && !quick.includes(st.date)) quick.push(st.date);
   const pills = quick.map(k => {
     const d = parseKey(k);
-    const free = slotsFor(k).length;
-    const note = !isWorkDay(k) ? 'Fechado' : free ? `${free} livre${free === 1 ? '' : 's'}` : 'Lotado';
-    return `<button class="day-pill ${k === st.date ? 'on' : ''}" data-action="pick-day" data-date="${k}" ${free ? '' : 'disabled'}>
+    const { free, rush } = info[k];
+    const note = !isWorkDay(k) ? 'Fechado' : free ? `${free} livre${free === 1 ? '' : 's'}` : rush ? 'Encaixe' : 'Lotado';
+    return `<button class="day-pill ${k === st.date ? 'on' : ''} ${rush ? 'is-rush' : ''}" data-action="pick-day" data-date="${k}" ${free || rush ? '' : 'disabled'}>
       <span>${DOW_SHORT[d.getDay()]}</span><b>${d.getDate()}</b><small>${MONTHS[d.getMonth()].slice(0, 3)}</small><em>${note}</em>
     </button>`;
   }).join('');
 
+  const picked = st.date && info[st.date];
   let slotsHtml = '<p class="pub-sub">Não há horários livres nos próximos dias. Fale com o estúdio.</p>';
-  if (st.date) {
+  if (picked && picked.rush) {
+    // O dia escolhido só tem horários dentro do prazo: mostra o pedido de encaixe no lugar dos horários
+    slotsHtml = `<h3 class="slot-day">${esc(fmtDateLong(st.date))}</h3>${rushNotice(st.date, true)}`;
+  } else if (st.date) {
     const groups = { Manhã: [], Tarde: [], Noite: [] };
     slotsFor(st.date).forEach(t => groups[t < 720 ? 'Manhã' : t < 1080 ? 'Tarde' : 'Noite'].push(fromMin(t)));
     slotsHtml = `<h3 class="slot-day">${esc(fmtDateLong(st.date))}</h3>` +
@@ -246,8 +301,9 @@ function stepTime({ back, backLabel, title }) {
     <p class="pub-sub">Duração total: ${fmtDuration(needDuration())}</p>
     <div class="day-scroll">${pills}</div>
     ${days.length > QUICK_DAYS ? `<button class="link-btn cal-toggle" data-action="toggle-cal">${icon('calendar')} ${st.showCal ? 'Fechar calendário' : `Ver mais datas (até ${fmtDateShort(days[days.length - 1]).slice(0, 5)})`}</button>` : ''}
-    ${st.showCal ? monthCalendar(days, free) : ''}
-    <div class="slot-area">${slotsHtml}</div>`;
+    ${st.showCal ? monthCalendar(days, info) : ''}
+    <div class="slot-area">${slotsHtml}</div>
+    ${picked && picked.rush ? '' : rushNotice(null, false)}`;
 }
 
 function stepDetails() {

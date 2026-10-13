@@ -28,7 +28,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 - 🛍️ Escolha de um ou mais serviços, com **valor e duração somados** automaticamente
 - 📅 Somente **horários realmente livres**, que comportam a duração escolhida
 - ✅ Agendamento sem precisar criar conta, confirmado na hora ou mediante **sinal por Pix** (copia e cola)
-- ⏱️ **Antecedência mínima** para agendar, evitando marcações em cima da hora
+- ⏱️ **Antecedência mínima** para agendar; dentro desse prazo a cliente vê um aviso de **encaixe** com botão para combinar pelo WhatsApp
 - 🗓️ Agendamento com **até 60 dias de antecedência** (configurável), com calendário do mês para datas distantes
 - 📲 Atalhos para salvar na agenda do celular e falar com o estúdio pelo WhatsApp
 - 🔁 **Link pessoal** para ver, remarcar ou cancelar o próprio horário (dentro do prazo definido pela dona)

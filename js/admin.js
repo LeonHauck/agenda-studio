@@ -1884,7 +1884,7 @@ function renderSettings() {
           <select id="set-lead" data-setting="minLeadMinutes">${LEAD_OPTIONS.map(([v, label]) =>
             `<option value="${v}" ${s.minLeadMinutes === v ? 'selected' : ''}>${label}</option>`).join('')}
           </select>
-          <small class="muted small">Evita agendamentos em cima da hora pelo link. Pelo painel, você continua podendo marcar a qualquer momento.</small>
+          <small class="muted small">Dentro desse prazo, a cliente não agenda sozinha: a página mostra um aviso de <b>encaixe</b> com um botão para falar com você pelo WhatsApp. Pelo painel, você continua podendo marcar a qualquer momento.${s.minLeadMinutes && !s.whatsapp ? ' <b style="color:var(--danger)">Preencha o WhatsApp do estúdio (acima) para o botão de encaixe aparecer.</b>' : ''}</small>
         </div>
       </div>
     </section>
@@ -1988,7 +1988,7 @@ function renderSettings() {
 
 const LEAD_OPTIONS = [
   [0, 'Sem antecedência mínima'], [30, '30 minutos antes'], [60, '1 hora antes'], [120, '2 horas antes'],
-  [180, '3 horas antes'], [360, '6 horas antes'], [720, '12 horas antes'], [1440, '24 horas antes'],
+  [180, '3 horas antes'], [360, '6 horas antes'], [720, '12 horas antes'], [1440, '24 horas antes'], [2880, '48 horas antes'],
 ];
 
 function calendarCardHtml() {
