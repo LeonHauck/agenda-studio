@@ -880,14 +880,20 @@ function openApptForm(appt, preset = {}) {
     notes: '',
   };
 
+  // Adicionais: itens não previstos lançados só neste agendamento (ex.: unha quebrada, reaplicação).
+  // Ficam junto dos serviços no banco, marcados com extra: true.
+  const extras = a.services.filter(x => x.extra).map(x => ({ name: x.name, price: x.price, duration: x.duration || 0 }));
+  const booked = a.services.filter(x => !x.extra);
+  const extraNames = [...new Set(db.appointments.flatMap(x => x.services).filter(x => x.extra).map(x => x.name))].sort();
+
   // Serviços atuais + serviços já excluídos que constam neste agendamento
   const options = db.services.map(s => ({ ...s }));
-  a.services.forEach(s => {
+  booked.forEach(s => {
     if (!options.some(o => o.id === s.serviceId)) {
       options.push({ id: s.serviceId, name: s.name, price: s.price, duration: s.duration, color: s.color });
     }
   });
-  const selected = new Set([...a.services.map(s => s.serviceId), ...(preset.serviceIds || [])]);
+  const selected = new Set([...booked.map(s => s.serviceId), ...(preset.serviceIds || [])]);
 
   const servicesHtml = options.length
     ? `<div class="chips">${options.map(o => `
@@ -941,6 +947,12 @@ function openApptForm(appt, preset = {}) {
         <span class="label">Serviços</span>
         ${servicesHtml}
       </div>
+      <div class="field">
+        <span class="label">Adicionais <span class="muted">(serviços não previstos)</span></span>
+        <div id="f-extras" class="extras"></div>
+        <datalist id="dl-extras">${extraNames.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+        <button type="button" class="link-btn" id="f-add-extra">${icon('plus')} Adicionar item</button>
+      </div>
       <div class="row">
         <div class="field"><label for="f-date">Data</label><input id="f-date" type="date"></div>
         <div class="field"><label for="f-slot">Horário</label><select id="f-slot"></select></div>
@@ -954,6 +966,7 @@ function openApptForm(appt, preset = {}) {
         <div class="field"><span class="label">Duração</span><div class="readout" id="f-duration">—</div></div>
         <div class="field"><label for="f-price">Valor (R$)</label><input id="f-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0,00"></div>
       </div>
+      <p class="hint" id="f-sum" hidden></p>
       ${statusHtml}
       ${isEdit && a.manageToken && clientCanManage() ? `<button type="button" class="link-btn" data-action="copy-manage" data-id="${a.id}">${icon('link')} Copiar link da cliente para remarcar ou cancelar</button>` : ''}
       <div class="field">
@@ -1000,13 +1013,22 @@ function openApptForm(appt, preset = {}) {
       bindPhoneMask($('#f-phone'));
 
       const chosen = () => $$('input[name=svc]:checked', f).map(i => options.find(o => o.id === i.value)).filter(Boolean);
-      const totals = () => { const list = chosen(); return { duration: sum(list, o => o.duration), price: sum(list, o => o.price) }; };
+      // Adicionais preenchidos (linhas totalmente vazias são ignoradas)
+      const filledExtras = () => extras.filter(x => String(x.name).trim() || Number(x.price) || Number(x.duration));
+      const totals = () => {
+        const list = chosen(), ex = filledExtras();
+        return { duration: sum(list, o => o.duration) + sum(ex, x => x.duration), price: sum(list, o => o.price) + sum(ex, x => x.price) };
+      };
       let priceTouched = isEdit && Math.abs(Number(a.price) - totals().price) > 0.009;
 
       function refresh() {
         const { duration, price } = totals();
         $('#f-duration').textContent = duration ? fmtDuration(duration) : '—';
         if (!priceTouched) priceIn.value = price ? price.toFixed(2) : '';
+        // Quando o valor foi alterado à mão (desconto, por exemplo), mostra a soma dos itens para conferência
+        const differs = priceTouched && Math.abs(Number(priceIn.value) - price) > 0.009;
+        $('#f-sum').hidden = !differs;
+        $('#f-sum').textContent = differs ? `Soma dos itens: ${money(price)}. O valor acima foi ajustado manualmente.` : '';
 
         const date = $('#f-date').value;
         const prev = slotSel.value || a.start;
@@ -1039,6 +1061,40 @@ function openApptForm(appt, preset = {}) {
         $('#f-manual-wrap').hidden = slotSel.value !== 'manual';
       }
 
+      const extrasBox = $('#f-extras');
+      function renderExtras() {
+        const head = extras.length ? '<div class="extra-row extra-head"><span>Descrição</span><span>Valor (R$)</span><span>Min.</span><span></span></div>' : '';
+        extrasBox.innerHTML = head + extras.map((x, i) => `
+          <div class="extra-row" data-i="${i}">
+            <input class="x-name" list="dl-extras" maxlength="60" placeholder="Ex.: unha quebrada" value="${esc(x.name)}" aria-label="Descrição do adicional">
+            <input class="x-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="R$" value="${x.price === '' ? '' : x.price}" aria-label="Valor">
+            <input class="x-min" type="number" inputmode="numeric" min="0" max="600" step="5" placeholder="min" value="${x.duration || ''}" aria-label="Minutos a mais">
+            <button type="button" class="icon-btn x-del" aria-label="Remover adicional">${icon('x')}</button>
+          </div>`).join('');
+      }
+      renderExtras();
+      extrasBox.addEventListener('input', e => {
+        const row = e.target.closest('.extra-row');
+        if (!row) return;
+        const x = extras[Number(row.dataset.i)];
+        x.name = $('.x-name', row).value;
+        x.price = Number($('.x-price', row).value) || 0;
+        x.duration = Math.max(0, Math.round(Number($('.x-min', row).value)) || 0);
+        refresh();
+      });
+      extrasBox.addEventListener('click', e => {
+        const del = e.target.closest('.x-del');
+        if (!del) return;
+        extras.splice(Number(del.closest('.extra-row').dataset.i), 1);
+        renderExtras();
+        refresh();
+      });
+      $('#f-add-extra').addEventListener('click', () => {
+        extras.push({ name: '', price: '', duration: 0 });
+        renderExtras();
+        $('.extra-row:last-child .x-name', extrasBox).focus();
+      });
+
       refresh();
 
       f.addEventListener('change', e => {
@@ -1069,11 +1125,14 @@ function openApptForm(appt, preset = {}) {
         const date = $('#f-date').value;
         const start = slotSel.value === 'manual' ? manual.value : slotSel.value;
         if (!name) return toast('Informe o nome da cliente.');
-        if (!list.length) return toast('Selecione pelo menos um serviço.');
+        const extraItems = filledExtras();
+        if (extraItems.some(x => !String(x.name).trim())) return toast('Descreva cada adicional (ex.: unha quebrada).');
+        if (!list.length && !extraItems.length) return toast('Selecione pelo menos um serviço.');
         if (!date) return toast('Escolha a data.');
         if (!start) return toast('Escolha um horário.');
 
-        const duration = sum(list, o => o.duration);
+        const duration = totals().duration;
+        if (!duration) return toast('Informe a duração: escolha um serviço ou preencha os minutos do adicional.');
         const conflict = findConflict(date, toMin(start), duration, a.id);
         if (conflict) {
           const ok = await confirmDialog(
@@ -1105,7 +1164,10 @@ function openApptForm(appt, preset = {}) {
             clientId: client.id,
             clientName: client.name,
             phone,
-            services: list.map(o => ({ serviceId: o.id, name: o.name, price: Number(o.price), duration: Number(o.duration), color: o.color })),
+            services: [
+              ...list.map(o => ({ serviceId: o.id, name: o.name, price: Number(o.price), duration: Number(o.duration), color: o.color })),
+              ...extraItems.map(x => ({ serviceId: null, name: String(x.name).trim(), price: Number(x.price) || 0, duration: Number(x.duration) || 0, color: '#8a8580', extra: true })),
+            ],
             date,
             start,
             duration,
@@ -1684,7 +1746,7 @@ function meterRows(list, note) {
   return `<div class="svc-rows">${list.map(r => `
     <div>
       <div class="svc-row-head">
-        <span>${r.color ? `<i style="background:${esc(r.color)}"></i>` : ''}<b>${esc(r.name)}</b><small>${r.count}x</small></span>
+        <span>${r.color ? `<i style="background:${esc(r.color)}"></i>` : ''}<b>${esc(r.name)}</b><small>${r.count}x${r.extra ? ' · adicional' : ''}</small></span>
         <strong>${money(r.value)}</strong>
       </div>
       <div class="meter"><i style="width:${(r.value / max) * 100}%"></i></div>
@@ -1719,7 +1781,7 @@ function serviceBreakdown(appts) {
     a.services.forEach(s => {
       // Rateia o valor cobrado (que pode ter desconto) proporcionalmente ao preço de cada serviço
       const share = base ? s.price / base : 1 / a.services.length;
-      const r = rows[s.name] || (rows[s.name] = { name: s.name, color: s.color, count: 0, value: 0 });
+      const r = rows[s.name] || (rows[s.name] = { name: s.name, color: s.color, count: 0, value: 0, extra: Boolean(s.extra) });
       r.count++;
       r.value += a.price * share;
     });

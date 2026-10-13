@@ -808,6 +808,14 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .status-line .i { width: 16px; height: 16px; }
 .status-line.is-on { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
 
+/* ---------- Adicionais do agendamento ---------- */
+.extras { display: flex; flex-direction: column; gap: 6px; }
+.extras:empty { display: none; }
+.extra-row { display: grid; grid-template-columns: minmax(0, 1fr) 82px 64px 36px; gap: 6px; align-items: center; }
+.extra-row input { padding: 0 10px !important; }
+.extra-head span { font-size: 11px; font-weight: 600; color: var(--muted); padding-left: 2px; }
+.extra-row .icon-btn { width: 36px; height: 36px; }
+
 /* ---------- Calendário do mês (página das clientes) ---------- */
 .cal-toggle { margin: 2px 0 4px; }
 .cal { margin: 10px 0 4px; padding: 14px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); }
