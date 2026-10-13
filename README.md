@@ -27,7 +27,8 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 ### 💅 Para as clientes (link público)
 - 🛍️ Escolha de um ou mais serviços, com **valor e duração somados** automaticamente
 - 📅 Somente **horários realmente livres**, que comportam a duração escolhida
-- ✅ Agendamento **confirmado na hora**, sem precisar criar conta
+- ✅ Agendamento sem precisar criar conta, confirmado na hora ou mediante **sinal por Pix** (copia e cola)
+- ⏱️ **Antecedência mínima** para agendar, evitando marcações em cima da hora
 - 📲 Atalhos para salvar na agenda do celular e falar com o estúdio pelo WhatsApp
 - 🔁 **Link pessoal** para ver, remarcar ou cancelar o próprio horário (dentro do prazo definido pela dona)
 
@@ -38,12 +39,14 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias), período do dia ou **toda semana** (ex.: almoço); o motivo fica visível só para a dona |
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |
 | 👥 | **Clientes** | Cadastro automático, busca, histórico, total pago, **número de faltas** e atalho para WhatsApp |
+| 💸 | **Sinal por Pix** | Percentual e prazo configuráveis; a dona confirma o recebimento e os não pagos são **cancelados automaticamente** |
 | 📊 | **Finanças** | Filtro por dia, semana ou mês; faturado × a receber; gráfico; por serviço e forma de pagamento |
 | ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, **intervalo de limpeza entre clientes** (padrão 15 min), cor do app, link e backup |
 
 - 🔔 Atualização em **tempo real** quando uma cliente agenda, remarca ou cancela
 - ⏰ **Lembretes** do próximo dia com mensagem pronta no WhatsApp, incluindo o link de remarcação
 - 📱 **Instalável** no celular como aplicativo (Android e iPhone)
+- 🗓️ **Agenda no calendário pessoal** da dona (Google Agenda ou iPhone) por link secreto
 - 🌗 Tema claro e escuro automáticos
 
 ---
