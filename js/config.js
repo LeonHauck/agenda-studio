@@ -6,4 +6,6 @@
 window.AGENDA_CONFIG = {
   supabaseUrl: 'https://aytjhrcbuzwsboesoufn.supabase.co',
   supabaseKey: 'sb_publishable_EN5UjdeHVRUECHGo_kyGpg_3rqvfUnv',
+  // Chave pública das notificações no celular (a privada fica só nos segredos do Supabase)
+  vapidPublicKey: 'BBcMh8k1045_eZy6QY3w9r5735RtswybaNjvCCg01-Ew3Os1AIQ-M_mgCynAtiWnKcmqaMeiw2pUSB_q7FBxjuQ',
 };

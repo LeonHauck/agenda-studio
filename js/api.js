@@ -204,7 +204,8 @@ const API = (() => {
       const since = dateKey(addDays(new Date(), -400));
       // Reserva caso o agendador interno do banco não tenha rodado: cancela sinais vencidos
       await sb.rpc('expire_unpaid_deposits').then(() => {}, () => {});
-      const [settings, services, clients, appointments, blocks, calendarToken] = await Promise.all([
+      const activitySince = new Date(Date.now() - 30 * 86400000).toISOString();
+      const [settings, services, clients, appointments, blocks, calendarToken, activity, seen] = await Promise.all([
         sb.from('settings').select('*').eq('id', 1).single().then(({ data, error }) => { check(error); return settingsFrom(data); }),
         fetchAll('services', q => q.order('sort').order('name').order('id')).then(rows => rows.map(serviceFrom)),
         fetchAll('clients', q => q.order('name').order('id')).then(rows => rows.map(clientFrom)),
@@ -215,8 +216,15 @@ const API = (() => {
           .catch(err => { console.warn('Bloqueios indisponíveis:', err.message); return []; }),
         sb.from('secrets').select('calendar_token').eq('id', 1).maybeSingle()
           .then(({ data }) => data?.calendar_token || null, () => null),
+        // Novidades dos últimos 30 dias (o que as clientes fizeram pelo link)
+        sb.from('activity').select('*').gte('created_at', activitySince).order('created_at', { ascending: false }).limit(100)
+          .then(({ data }) => (data || []).map(r => ({
+            id: r.id, kind: r.kind, appointmentId: r.appointment_id, message: r.message, createdAt: r.created_at,
+          })), () => []),
+        sb.auth.getUser().then(({ data }) => sb.from('admins').select('activity_seen_at').eq('user_id', data.user?.id).maybeSingle())
+          .then(({ data }) => data?.activity_seen_at || null, () => null),
       ]);
-      return { settings, services, clients, appointments, blocks, calendarToken };
+      return { settings, services, clients, appointments, blocks, calendarToken, activity, activitySeenAt: seen };
     },
     async saveSettings(s) {
       const { error } = await sb.from('settings').update(settingsTo(s)).eq('id', 1);
@@ -238,6 +246,30 @@ const API = (() => {
       check(error);
       return apptFrom(data);
     },
+    /* ---------- Novidades e notificações ---------- */
+    async markActivitySeen() {
+      const { data } = await sb.auth.getUser();
+      const now = new Date().toISOString();
+      const { error } = await sb.from('admins').update({ activity_seen_at: now }).eq('user_id', data.user.id);
+      check(error);
+      return now;
+    },
+    vapidPublicKey: cfg.vapidPublicKey || '',
+    async savePushSubscription(sub) {
+      const j = sub.toJSON();
+      const { error } = await sb.from('push_subscriptions')
+        .upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: 'endpoint' });
+      check(error);
+    },
+    async deletePushSubscription(endpoint) {
+      const { error } = await sb.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      check(error);
+    },
+    async sendTestNotification() {
+      const { error } = await sb.rpc('send_test_notification');
+      check(error);
+    },
+
     /** Link que os aplicativos de calendário (Google, iPhone) assinam para mostrar a agenda. */
     calendarFeedUrl(token) {
       return `${cfg.supabaseUrl}/rest/v1/rpc/agenda_ics?apikey=${encodeURIComponent(cfg.supabaseKey)}&p_token=${token}`;
@@ -255,7 +287,7 @@ const API = (() => {
     /** Avisa quando algo muda no banco (ex.: cliente agendou pelo link). */
     subscribe(onChange) {
       const channel = sb.channel('agenda-admin');
-      ['appointments', 'clients', 'services', 'blocks'].forEach(table => {
+      ['appointments', 'clients', 'services', 'blocks', 'activity'].forEach(table => {
         channel.on('postgres_changes', { event: '*', schema: 'public', table }, payload => onChange(table, payload));
       });
       channel.subscribe();

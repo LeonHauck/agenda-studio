@@ -629,6 +629,145 @@ end $$;
 revoke all on function public.agenda_ics(uuid) from public;
 grant execute on function public.agenda_ics(uuid) to anon, authenticated;
 
+-- ---------- Novidades e notificações (o que as clientes fizeram pelo link) ----------
+-- Cada agendamento online, remarcação, cancelamento ou sinal vencido vira uma "novidade".
+-- O painel mostra as novidades e uma Edge Function ("notify") envia o aviso para o celular.
+create table if not exists public.activity (
+  id             uuid primary key default gen_random_uuid(),
+  kind           text not null check (kind in ('agendou', 'remarcou', 'cancelou', 'expirou', 'teste')),
+  appointment_id uuid references public.appointments (id) on delete set null,
+  client_name    text not null default '',
+  message        text not null,
+  created_at     timestamptz not null default now()
+);
+create index if not exists activity_created_idx on public.activity (created_at desc);
+alter table public.activity enable row level security;
+drop policy if exists "admin lê novidades" on public.activity;
+create policy "admin lê novidades" on public.activity for select to authenticated using (public.is_admin());
+grant select on public.activity to authenticated;
+
+-- Até quando cada administradora já viu as novidades
+alter table public.admins add column if not exists activity_seen_at timestamptz;
+drop policy if exists "admin marca novidades como vistas" on public.admins;
+create policy "admin marca novidades como vistas" on public.admins
+  for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+grant update (activity_seen_at) on public.admins to authenticated;
+
+-- Aparelhos que recebem notificação (um registro por celular/navegador)
+create table if not exists public.push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.push_subscriptions enable row level security;
+drop policy if exists "admin gerencia os próprios aparelhos" on public.push_subscriptions;
+create policy "admin gerencia os próprios aparelhos" on public.push_subscriptions
+  for all to authenticated using (user_id = auth.uid() and public.is_admin())
+  with check (user_id = auth.uid() and public.is_admin());
+grant select, insert, update, delete on public.push_subscriptions to authenticated;
+
+-- Endereço da Edge Function e segredo compartilhado (preenchidos no passo a passo)
+alter table public.secrets add column if not exists push_url text not null default '';
+alter table public.secrets add column if not exists push_secret text not null default '';
+
+-- "sex 16/10 às 09:00"
+create or replace function public.fmt_when(d date, t text) returns text
+language sql immutable as $$
+  select (array['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'])[extract(dow from d)::int + 1]
+         || ' ' || to_char(d, 'DD/MM') || ' às ' || t
+$$;
+
+-- Registra o que a cliente fez. Mudanças feitas pela dona no painel não geram novidade.
+create or replace function public.log_client_activity() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_kind text;
+  v_msg  text;
+  v_svc  text;
+begin
+  if tg_op = 'INSERT' then
+    if new.source <> 'online' then return new; end if;
+    v_kind := 'agendou';
+  elsif new.client_action is not null and new.client_action_at is distinct from old.client_action_at then
+    v_kind := new.client_action;
+  else
+    return new;
+  end if;
+
+  select string_agg(case when coalesce((e ->> 'qty')::int, 1) > 1 then (e ->> 'qty') || '× ' else '' end || (e ->> 'name'), ' + ')
+    into v_svc from jsonb_array_elements(new.services) e;
+
+  v_msg := case v_kind
+    when 'agendou'  then new.client_name || ' agendou ' || coalesce(v_svc, 'um horário') || ' para ' || public.fmt_when(new.date, new.start_time)
+    when 'remarcou' then new.client_name || ' remarcou: ' || public.fmt_when(old.date, old.start_time) || ' → ' || public.fmt_when(new.date, new.start_time)
+    when 'cancelou' then new.client_name || ' cancelou o horário de ' || public.fmt_when(new.date, new.start_time)
+    else 'Sinal não pago: o horário de ' || new.client_name || ' (' || public.fmt_when(new.date, new.start_time) || ') foi liberado'
+  end;
+
+  insert into public.activity (kind, appointment_id, client_name, message)
+  values (v_kind, new.id, new.client_name, v_msg);
+  return new;
+exception when others then
+  return new;  -- nunca impede o agendamento por causa do registro
+end $$;
+
+drop trigger if exists appointments_activity on public.appointments;
+create trigger appointments_activity after insert or update on public.appointments
+  for each row execute function public.log_client_activity();
+
+-- Envia cada novidade para a Edge Function "notify" (que manda o push para os celulares)
+do $$
+begin
+  create extension if not exists pg_net;
+exception when others then
+  raise notice 'pg_net indisponível: %', sqlerrm;
+end $$;
+
+create or replace function public.push_activity() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_url    text;
+  v_secret text;
+begin
+  select push_url, push_secret into v_url, v_secret from public.secrets where id = 1;
+  if coalesce(v_url, '') = '' or coalesce(v_secret, '') = '' then return new; end if;
+  perform net.http_post(
+    url := v_url,
+    body := jsonb_build_object(
+      'title', case new.kind
+        when 'agendou' then 'Novo agendamento'
+        when 'remarcou' then 'Horário remarcado'
+        when 'cancelou' then 'Horário cancelado'
+        when 'expirou' then 'Sinal não pago'
+        else 'Notificações ativas' end,
+      'body', new.message,
+      'tag', coalesce(new.appointment_id::text, new.id::text)),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-push-secret', v_secret));
+  return new;
+exception when others then
+  return new;  -- se a notificação falhar, a novidade continua registrada
+end $$;
+
+drop trigger if exists activity_push on public.activity;
+create trigger activity_push after insert on public.activity
+  for each row execute function public.push_activity();
+
+-- Botão "Enviar teste" do painel
+create or replace function public.send_test_notification() returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Sem permissão.'; end if;
+  insert into public.activity (kind, message)
+  values ('teste', 'Teste do painel: se você está vendo isto, as notificações estão funcionando.');
+end $$;
+revoke all on function public.send_test_notification() from public, anon;
+grant execute on function public.send_test_notification() to authenticated;
+revoke all on function public.log_client_activity() from public, anon, authenticated;
+revoke all on function public.push_activity() from public, anon, authenticated;
+
 -- ---------- Manutenção: "batimento" para o Supabase não pausar o projeto ----------
 -- A tarefa automática do GitHub chama keep_alive() várias vezes por dia. A função grava
 -- a data/hora da última chamada numa tabela de uma linha só (atividade de escrita no banco).
@@ -657,7 +796,7 @@ grant execute on function public.keep_alive() to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['appointments', 'clients', 'services', 'blocks'] loop
+  foreach t in array array['appointments', 'clients', 'services', 'blocks', 'activity'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then null;  -- já estava na publicação

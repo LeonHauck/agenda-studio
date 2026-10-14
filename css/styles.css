@@ -863,6 +863,26 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .rush-line span .i { width: 16px; height: 16px; margin-top: 1px; }
 .btn-ghost.btn-wa-solid { color: #1a9e55; }
 
+/* ---------- Novidades ---------- */
+.reminder-banner.is-news { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
+.act-list { display: flex; flex-direction: column; }
+.act-row {
+  display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: center;
+  width: 100%; padding: 11px 6px; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; border-radius: 10px;
+}
+.act-row:last-child { border-bottom: 0; }
+.act-row.is-new { background: var(--accent-soft); }
+.act-row b { display: block; font-size: 14px; font-weight: 500; }
+.act-row.is-new b { font-weight: 600; }
+.act-row small { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.act-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); }
+.act-icon .i { width: 18px; height: 18px; }
+.act-icon.k-agendou { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.act-icon.k-remarcou { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
+.act-icon.k-cancelou { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.act-icon.k-expirou { background: color-mix(in srgb, #c98a14 14%, transparent); color: #b7791f; }
+
 /* ---------- Retornos ---------- */
 .reminder-banner.is-return { border-color: color-mix(in srgb, var(--info) 35%, var(--line)); background: color-mix(in srgb, var(--info) 8%, var(--surface)); }
 .reminder-banner.is-return > .i, .reminder-banner.is-return .block-edit { color: var(--info); }

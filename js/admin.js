@@ -325,16 +325,9 @@ function startRealtime() {
   if (realtimeOn) return;
   realtimeOn = true;
   API.subscribe((table, payload) => {
-    const row = payload.new;
-    if (table === 'appointments' && payload.eventType === 'INSERT' && row?.source === 'online') {
-      toast(`Novo agendamento online: ${row.client_name}, ${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`);
-    }
-    if (table === 'appointments' && payload.eventType === 'UPDATE' && row?.client_action && row.client_action_at &&
-        Date.now() - Date.parse(row.client_action_at) < 60000) {
-      const when = `${fmtDateShort(row.date).slice(0, 5)} às ${row.start_time}`;
-      toast(row.client_action === 'cancelou' ? `${row.client_name} cancelou o horário de ${when}`
-        : row.client_action === 'expirou' ? `Sinal não pago: o horário de ${row.client_name} (${when}) foi liberado`
-        : `${row.client_name} remarcou para ${when}`);
+    // Novidade registrada pelo banco (agendamento online, remarcação, cancelamento, sinal vencido)
+    if (table === 'activity' && payload.eventType === 'INSERT' && payload.new?.kind !== 'teste') {
+      toast(payload.new.message);
     }
     scheduleReload();
   });
@@ -389,6 +382,7 @@ function render() {
   if (!db) return;
   const route = currentRoute();
   $('#view').innerHTML = ROUTES[route].render() + creditHtml();
+  if (route === 'ajustes') refreshPushCard();
   $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === route));
   $('#brand-name').textContent = db.settings.businessName;
   document.title = `${ROUTES[route].label} · ${db.settings.businessName}`;
@@ -441,6 +435,7 @@ function renderAgenda() {
       <div class="week">${week}</div>
     </section>
 
+    ${activityBanner()}
     ${depositBanner()}
     ${returnsBanner()}
     ${reminderBanner()}
@@ -1258,6 +1253,119 @@ async function offerChangeNotice(before, after) {
 }
 
 /* ============================================================
+   Novidades: o que as clientes fizeram pelo link
+   ============================================================ */
+const ACTIVITY_ICONS = { agendou: 'plus', remarcou: 'repeat', cancelou: 'x', expirou: 'pix' };
+const unseenActivity = () => (db.activity || [])
+  .filter(a => a.kind !== 'teste' && (!db.activitySeenAt || a.createdAt > db.activitySeenAt));
+
+function timeAgo(iso) {
+  const min = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (min < 1) return 'agora mesmo';
+  if (min < 60) return `há ${min} min`;
+  if (min < 24 * 60) return `há ${Math.round(min / 60)} h`;
+  const d = new Date(iso);
+  const yesterday = dateKey(addDays(new Date(), -1)) === dateKey(d);
+  return `${yesterday ? 'ontem' : fmtDateShort(dateKey(d)).slice(0, 5)} às ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function activityBanner() {
+  const n = unseenActivity().length;
+  if (!n) return '';
+  return `<button class="reminder-banner is-news" data-action="open-activity">
+    ${icon('bell')}
+    <div><b>${n} novidade${n === 1 ? '' : 's'} desde sua última visita</b><span>Agendamentos, remarcações e cancelamentos das clientes</span></div>
+    <span class="block-edit">Ver</span>
+  </button>`;
+}
+
+function openActivity() {
+  const fresh = new Set(unseenActivity().map(a => a.id));
+  const list = (db.activity || []).filter(a => a.kind !== 'teste');
+  openSheet({
+    title: 'Novidades',
+    body: `<div class="stack">
+      <p class="muted small" style="margin:0">O que as clientes fizeram pelo link nos últimos 30 dias. Toque para abrir o agendamento.</p>
+      <div class="act-list">${list.length ? list.map(a => `
+        <button type="button" class="act-row ${fresh.has(a.id) ? 'is-new' : ''}" ${a.appointmentId ? `data-action="edit-appt" data-id="${a.appointmentId}"` : ''}>
+          <span class="act-icon k-${a.kind}">${icon(ACTIVITY_ICONS[a.kind] || 'bell')}</span>
+          <span class="act-body"><b>${esc(a.message)}</b><small>${timeAgo(a.createdAt)}${fresh.has(a.id) ? ' · nova' : ''}</small></span>
+        </button>`).join('') : '<p class="muted small" style="margin:8px 0 0">Nenhuma novidade nos últimos 30 dias.</p>'}
+      </div>
+    </div>`,
+    footer: '<span class="spacer"></span><button type="button" class="btn btn-primary" data-action="close-sheet">Fechar</button>',
+  });
+  // Ao abrir a lista, tudo passa a contar como visto
+  API.markActivitySeen().then(t => { db.activitySeenAt = t; render(); }).catch(err => console.error(err));
+}
+
+/* ---------- Notificações no celular (Web Push) ---------- */
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && Boolean(API.vapidPublicKey);
+
+// O "service worker" (sw.js) recebe as notificações; espera ele ficar pronto por até 8 segundos
+function swReady() {
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('sw-timeout')), 8000));
+  return Promise.race([navigator.serviceWorker.ready, timeout]);
+}
+
+async function currentPushSub() {
+  if (!pushSupported()) return null;
+  const reg = await swReady();
+  return reg.pushManager.getSubscription();
+}
+
+function b64ToBytes(b64) {
+  const raw = atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function refreshPushCard() {
+  const box = $('#push-box');
+  if (!box) return;
+  if (!pushSupported()) {
+    box.innerHTML = '<p class="muted small" style="margin:0">Este navegador não aceita notificações. No Android, abra o painel pelo <b>Chrome</b> ou pelo app instalado.</p>';
+    return;
+  }
+  let sub;
+  try {
+    sub = await currentPushSub();
+  } catch {
+    if ($('#push-box')) box.innerHTML = '<p class="muted small" style="margin:0">Não foi possível verificar as notificações agora. Recarregue a página (no celular, feche e abra o app) e tente de novo.</p>';
+    return;
+  }
+  if (!$('#push-box')) return;
+  if (sub) {
+    box.innerHTML = `<p class="status-line is-on">${icon('check')} Ativas neste aparelho</p>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" data-action="push-test">${icon('bell')} Enviar notificação de teste</button>
+        <button type="button" class="btn btn-ghost" data-action="push-off">Desativar neste aparelho</button>
+      </div>`;
+  } else if (Notification.permission === 'denied') {
+    box.innerHTML = `<p class="status-line">${icon('alert')} Bloqueadas neste navegador</p>
+      <p class="muted small" style="margin:0">Para liberar: toque no <b>cadeado</b> ao lado do endereço do site → <b>Permissões</b> (ou Configurações do site) → <b>Notificações</b> → <b>Permitir</b>. Depois, recarregue a página.</p>`;
+  } else {
+    box.innerHTML = `<p class="status-line">${icon('bell')} Desativadas neste aparelho</p>
+      <button type="button" class="btn btn-primary" data-action="push-on">${icon('bell')} Ativar notificações</button>`;
+  }
+}
+
+async function enablePush() {
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') throw new Error('Permissão negada. Para receber os avisos, permita as notificações quando o navegador perguntar.');
+  const reg = await swReady();
+  const sub = (await reg.pushManager.getSubscription()) ||
+    await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(API.vapidPublicKey) });
+  await API.savePushSubscription(sub);
+}
+
+async function disablePush() {
+  const sub = await currentPushSub();
+  if (!sub) return;
+  await API.deletePushSubscription(sub.endpoint);
+  await sub.unsubscribe();
+}
+
+/* ============================================================
    Retornos: clientes na época da manutenção, sem horário marcado
    ============================================================ */
 function returnsBanner() {
@@ -2004,6 +2112,12 @@ function renderSettings() {
     </section>
 
     <section class="card pad">
+      <h2>Notificações no celular</h2>
+      <p class="muted small" style="margin:-6px 0 12px">Receba um aviso na hora quando uma cliente agendar, remarcar ou cancelar pelo link, mesmo com o app fechado. Ative em cada aparelho que você usa.</p>
+      <div id="push-box"><p class="muted small" style="margin:0">Verificando…</p></div>
+    </section>
+
+    <section class="card pad">
       <h2>Conta</h2>
       <p class="muted small" style="margin:-6px 0 14px">Conectada como <b>${esc(ui.email || '')}</b>. Os dados ficam salvos na nuvem (Supabase).</p>
       <div class="btn-row">
@@ -2196,6 +2310,21 @@ const ACTIONS = {
   'close-sheet': el => { closeSheet(); if (el.getAttribute('href')) location.hash = el.getAttribute('href'); },
   'open-reminders': () => openReminders(),
   'open-deposits': () => openDeposits(),
+  'open-activity': () => openActivity(),
+  'push-on': el => withBusy(el, async () => {
+    await enablePush();
+    toast('Notificações ativadas neste aparelho');
+    refreshPushCard();
+  }),
+  'push-off': el => withBusy(el, async () => {
+    await disablePush();
+    toast('Notificações desativadas neste aparelho');
+    refreshPushCard();
+  }),
+  'push-test': el => withBusy(el, async () => {
+    await API.sendTestNotification();
+    toast('Teste enviado. A notificação deve chegar em alguns segundos.');
+  }),
   'open-returns': () => openReturns(),
   'book-return': el => {
     const c = db.clients.find(x => x.id === el.dataset.id);

@@ -49,6 +49,8 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | ⚙️ | **Ajustes** | Horário e dias de atendimento, intervalo entre horários, **intervalo de limpeza entre clientes** (padrão 15 min), cor do app, link e backup |
 
 - 🔔 Atualização em **tempo real** quando uma cliente agenda, remarca ou cancela
+- 📬 **Novidades**: ao abrir o painel, a dona vê o que as clientes fizeram desde a última visita
+- 📲 **Notificação no celular** (Web Push) na hora em que a cliente agenda, remarca ou cancela, mesmo com o app fechado
 - ⏰ **Lembretes** do próximo dia com mensagem pronta no WhatsApp, incluindo o link de remarcação
 - 📱 **Instalável** no celular como aplicativo (Android e iPhone)
 - 🗓️ **Agenda no calendário pessoal** da dona (Google Agenda ou iPhone) por link secreto
@@ -89,7 +91,8 @@ A função de agendamento valida no servidor os serviços, o expediente, horári
 │   └── 🌐 public.js          lógica da página pública
 ├── 📁 icons                  ícones do app (SVG e PNG)
 └── 📁 supabase
-    └── 🗄️ schema.sql         tabelas, regras de segurança e funções
+    ├── 🗄️ schema.sql         tabelas, regras de segurança e funções
+    └── 📁 functions/notify   Edge Function que envia as notificações push
 ```
 
 ---
@@ -108,6 +111,8 @@ A função de agendamento valida no servidor os serviços, o expediente, horári
 5. Em **Authentication → Sign In / Providers**, desative **Allow new users to sign up**.
 6. Copie a **Project URL** e a chave **publishable** para [`js/config.js`](js/config.js).
 7. **Recuperação de senha:** configure um SMTP próprio em **Authentication → Emails → SMTP Settings**, a URL do painel em **Authentication → URL Configuration** e cole o modelo [`supabase/email-recuperar-senha.html`](supabase/email-recuperar-senha.html) em **Emails → Templates → Reset Password**.
+
+8. **Notificações no celular (opcional):** gere um par de chaves VAPID, publique a Edge Function [`supabase/functions/notify`](supabase/functions/notify/index.ts) com a verificação de JWT desligada e cadastre os segredos `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` e `PUSH_SECRET`. Depois preencha `push_url` e `push_secret` na tabela `secrets` e a chave pública em `js/config.js` (`vapidPublicKey`).
 
 > [!WARNING]
 > Nunca coloque a chave **secret / service_role** no site. A chave publishable foi feita para ficar pública.
