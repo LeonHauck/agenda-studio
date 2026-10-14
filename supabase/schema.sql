@@ -559,16 +559,18 @@ language sql immutable as $$
   select replace(replace(replace(replace(coalesce(t, ''), '\', '\\'), ';', '\;'), ',', '\,'), E'\n', '\n')
 $$;
 
--- O PostgREST entrega funções que retornam este tipo com Content-Type: text/calendar
+-- Tipo "qualquer formato" do PostgREST: a função responde sempre como calendário,
+-- mesmo quando o aplicativo (ex.: Google Agenda) pede com "Accept: */*" ou sem Accept.
 do $$
 begin
-  create domain "text/calendar" as text;
+  create domain "*/*" as bytea;
 exception when duplicate_object then null;
 end $$;
 
 -- Agenda no formato iCalendar: serviço, horário e primeiro nome da cliente (sem telefone).
 -- Só responde com o código secreto correto.
-create or replace function public.agenda_ics(p_token uuid) returns "text/calendar"
+drop function if exists public.agenda_ics(uuid);
+create or replace function public.agenda_ics(p_token uuid) returns "*/*"
 language plpgsql stable security definer set search_path = public as $$
 declare
   nl     text := E'\r\n';
@@ -601,7 +603,9 @@ begin
          and a.date >= current_date - 30
     ) x;
 
-  return 'BEGIN:VCALENDAR' || nl ||
+  perform set_config('response.headers',
+    '[{"Content-Type": "text/calendar; charset=utf-8"}, {"Cache-Control": "no-cache"}]', true);
+  return convert_to('BEGIN:VCALENDAR' || nl ||
          'VERSION:2.0' || nl ||
          'PRODID:-//Agenda Studio//PT-BR' || nl ||
          'CALSCALE:GREGORIAN' || nl ||
@@ -620,7 +624,7 @@ begin
          'END:STANDARD' || nl ||
          'END:VTIMEZONE' || nl ||
          case when v_body = '' then '' else v_body || nl end ||
-         'END:VCALENDAR' || nl;
+         'END:VCALENDAR' || nl, 'UTF8');
 end $$;
 revoke all on function public.agenda_ics(uuid) from public;
 grant execute on function public.agenda_ics(uuid) to anon, authenticated;
