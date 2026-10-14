@@ -205,7 +205,8 @@ a { color: inherit; text-decoration: none; }
 }
 .month-btn:hover { background: var(--surface-2); }
 .month-btn .i { width: 16px; height: 16px; color: var(--muted); }
-.date-jump { position: absolute; left: 0; bottom: 0; width: 100%; height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.month-btn .i { transition: transform .2s; }
+.week-card.is-month .month-btn .i { transform: rotate(180deg); }
 .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
 .day {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -221,6 +222,20 @@ a { color: inherit; text-decoration: none; }
 .day-dot { display: flex; gap: 3px; height: 5px; }
 .day-dot i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .day.is-selected .day-dot i { background: var(--on-accent); }
+
+/* Mês inteiro */
+.month-grid { row-gap: 2px; }
+.month-dow { padding: 2px 0 6px; text-align: center; font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.month-grid .day { padding: 4px 0 5px; border-radius: 12px; min-height: 52px; }
+.month-grid .day-num { font-size: 15px; height: 26px; }
+.month-grid .day.is-other:not(.is-selected) { opacity: .35; }
+.day-count { display: none; font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.day.is-selected .day-count { color: var(--on-accent); }
+@media (min-width: 640px) {
+  .month-grid .day { min-height: 64px; }
+  .month-grid .day-dot { display: none; }
+  .month-grid .day-count { display: block; }
+}
 
 /* ---------- Agendamentos ---------- */
 .timeline { display: flex; flex-direction: column; gap: 8px; }

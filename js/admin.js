@@ -391,22 +391,61 @@ function render() {
 /* ============================================================
    Tela: Agenda
    ============================================================ */
-function renderAgenda() {
-  const sel = parseKey(ui.date);
-  const weekStart = addDays(sel, -sel.getDay());
-  const tk = todayKey();
+/* Visão do calendário da Agenda: 'semana' (faixa) ou 'mes' (mês inteiro); fica salva neste aparelho */
+function savedCalView() {
+  try { return localStorage.getItem('agenda-cal-view') === 'mes' ? 'mes' : 'semana'; } catch { return 'semana'; }
+}
+function setCalView(v) {
+  ui.cal = v;
+  try { localStorage.setItem('agenda-cal-view', v); } catch { /* sem armazenamento: vale só nesta visita */ }
+}
 
-  const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)).map(d => {
-    const k = dateKey(d);
-    const count = dayAppointments(k).filter(isActive).length;
-    const off = !isWorkDay(k) || fullDayBlock(k);
-    const cls = ['day', k === ui.date && 'is-selected', k === tk && 'is-today', off && 'is-off', fullDayBlock(k) && 'is-blocked'].filter(Boolean).join(' ');
-    return `<button class="${cls}" data-action="pick-day" data-date="${k}" aria-label="${esc(fmtDateLong(k))}">
-      <span class="day-dow">${DOW_SHORT[d.getDay()]}</span>
-      <span class="day-num">${d.getDate()}</span>
-      <span class="day-dot">${'<i></i>'.repeat(Math.min(count, 3))}</span>
-    </button>`;
+function dayCell(d, tk, extra = '') {
+  const k = dateKey(d);
+  const count = dayAppointments(k).filter(isActive).length;
+  const off = !isWorkDay(k) || fullDayBlock(k);
+  const cls = ['day', extra, k === ui.date && 'is-selected', k === tk && 'is-today', off && 'is-off', fullDayBlock(k) && 'is-blocked'].filter(Boolean).join(' ');
+  const label = `${fmtDateLong(k)}${count ? ` · ${count} atendimento${count > 1 ? 's' : ''}` : ''}`;
+  return `<button class="${cls}" data-action="pick-day" data-date="${k}" aria-label="${esc(label)}">
+    ${ui.cal === 'mes' ? '' : `<span class="day-dow">${DOW_SHORT[d.getDay()]}</span>`}
+    <span class="day-num">${d.getDate()}</span>
+    <span class="day-dot">${'<i></i>'.repeat(Math.min(count, 3))}</span>
+    ${ui.cal === 'mes' && count ? `<span class="day-count">${count} atend.</span>` : ''}
+  </button>`;
+}
+
+function calendarGrid(sel, tk) {
+  if (ui.cal !== 'mes') {
+    const weekStart = addDays(sel, -sel.getDay());
+    return `<div class="week">${Array.from({ length: 7 }, (_, i) => dayCell(addDays(weekStart, i), tk)).join('')}</div>`;
+  }
+  // Mês inteiro, em semanas de domingo a sábado (dias dos meses vizinhos aparecem apagados)
+  const first = new Date(sel.getFullYear(), sel.getMonth(), 1);
+  const last = new Date(sel.getFullYear(), sel.getMonth() + 1, 0);
+  const start = addDays(first, -first.getDay());
+  const total = Math.ceil((first.getDay() + last.getDate()) / 7) * 7;
+  const head = DOW_SHORT.map(d => `<span class="month-dow">${d}</span>`).join('');
+  const cells = Array.from({ length: total }, (_, i) => {
+    const d = addDays(start, i);
+    return dayCell(d, tk, d.getMonth() !== sel.getMonth() && 'is-other');
   }).join('');
+  return `<div class="week month-grid">${head}${cells}</div>`;
+}
+
+// Mês vizinho: abre no dia de hoje se ele estiver no mês, senão no dia 1
+function shiftMonth(dir) {
+  const sel = parseKey(ui.date);
+  const first = new Date(sel.getFullYear(), sel.getMonth() + dir, 1);
+  const tk = todayKey();
+  ui.date = tk.slice(0, 7) === dateKey(first).slice(0, 7) ? tk : dateKey(first);
+  render();
+}
+
+function renderAgenda() {
+  if (!ui.cal) ui.cal = savedCalView();
+  const sel = parseKey(ui.date);
+  const tk = todayKey();
+  const isMonth = ui.cal === 'mes';
 
   const appts = dayAppointments(ui.date);
   const active = appts.filter(isActive);
@@ -423,16 +462,15 @@ function renderAgenda() {
       </div>
     </header>
 
-    <section class="card week-card">
+    <section class="card week-card${isMonth ? ' is-month' : ''}">
       <div class="week-head">
-        <button class="icon-btn" data-action="week-prev" aria-label="Semana anterior">${icon('chevLeft')}</button>
-        <button class="month-btn" data-action="open-date">
+        <button class="icon-btn" data-action="${isMonth ? 'month-prev' : 'week-prev'}" aria-label="${isMonth ? 'Mês anterior' : 'Semana anterior'}">${icon('chevLeft')}</button>
+        <button class="month-btn" data-action="toggle-cal" aria-expanded="${isMonth}" title="${isMonth ? 'Ver só a semana' : 'Ver o mês inteiro'}">
           ${MONTHS[sel.getMonth()]} ${sel.getFullYear()} ${icon('chevDown')}
-          <input type="date" id="date-jump" class="date-jump" value="${ui.date}" tabindex="-1" aria-hidden="true">
         </button>
-        <button class="icon-btn" data-action="week-next" aria-label="Próxima semana">${icon('chevRight')}</button>
+        <button class="icon-btn" data-action="${isMonth ? 'month-next' : 'week-next'}" aria-label="${isMonth ? 'Próximo mês' : 'Próxima semana'}">${icon('chevRight')}</button>
       </div>
-      <div class="week">${week}</div>
+      ${calendarGrid(sel, tk)}
     </section>
 
     ${activityBanner()}
@@ -2290,10 +2328,9 @@ const ACTIONS = {
   'week-prev': () => { ui.date = dateKey(addDays(parseKey(ui.date), -7)); render(); },
   'week-next': () => { ui.date = dateKey(addDays(parseKey(ui.date), 7)); render(); },
   'go-today': () => { ui.date = todayKey(); render(); },
-  'open-date': () => {
-    const input = $('#date-jump');
-    try { input.showPicker(); } catch { input.focus(); input.click(); }
-  },
+  'toggle-cal': () => { setCalView(ui.cal === 'mes' ? 'semana' : 'mes'); render(); },
+  'month-prev': () => shiftMonth(-1),
+  'month-next': () => shiftMonth(1),
   'fin-period': el => { ui.finPeriod = el.dataset.period; render(); },
   'fin-prev': () => shiftPeriod(-1),
   'fin-next': () => shiftPeriod(1),
@@ -2430,7 +2467,6 @@ document.addEventListener('click', e => {
 
 document.addEventListener('change', e => {
   const el = e.target;
-  if (el.id === 'date-jump') { if (el.value) { ui.date = el.value; render(); } return; }
   if (el.dataset.setting) onSettingChange(el);
 });
 
