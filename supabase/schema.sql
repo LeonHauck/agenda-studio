@@ -668,6 +668,9 @@ create policy "admin gerencia os próprios aparelhos" on public.push_subscriptio
   for all to authenticated using (user_id = auth.uid() and public.is_admin())
   with check (user_id = auth.uid() and public.is_admin());
 grant select, insert, update, delete on public.push_subscriptions to authenticated;
+-- A Edge Function "notify" lê os aparelhos e apaga os que deixaram de existir
+grant usage on schema public to service_role;
+grant select, delete on public.push_subscriptions to service_role;
 
 -- Endereço da Edge Function e segredo compartilhado (preenchidos no passo a passo)
 alter table public.secrets add column if not exists push_url text not null default '';

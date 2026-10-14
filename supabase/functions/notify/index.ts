@@ -12,6 +12,18 @@
 import webpush from 'npm:web-push@3.6.7';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+// Chave de servidor do projeto (formato antigo "service_role" ou novo "secret"), já disponível na função
+function serverKey(): string {
+  const legacy = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (legacy) return legacy;
+  try {
+    const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}');
+    const first = Object.values(keys)[0];
+    if (typeof first === 'string') return first;
+  } catch { /* segue para o erro abaixo */ }
+  throw new Error('Chave de servidor não encontrada nas variáveis da Edge Function');
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Método não permitido', { status: 405 });
   if (req.headers.get('x-push-secret') !== Deno.env.get('PUSH_SECRET')) {
@@ -25,7 +37,7 @@ Deno.serve(async (req) => {
     Deno.env.get('VAPID_PRIVATE_KEY')!,
   );
 
-  const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, serverKey());
   const { data: subs, error } = await db.from('push_subscriptions').select('id, endpoint, p256dh, auth');
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
