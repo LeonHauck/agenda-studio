@@ -808,6 +808,16 @@ input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--mute
 .status-line .i { width: 16px; height: 16px; }
 .status-line.is-on { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
 
+/* ---------- Quantidade do serviço no agendamento ---------- */
+.chip-card .qty { display: none; align-items: center; gap: 8px; margin-top: 6px; }
+.chip-opt input:checked + .chip-card .qty { display: inline-flex; }
+.chip-card .qty button {
+  width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 16px; font-weight: 600; line-height: 1; color: var(--text);
+}
+.chip-card .qty button:hover { border-color: var(--accent); color: var(--accent); }
+.chip-card .qty b { min-width: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+
 /* ---------- Adicionais do agendamento ---------- */
 .extras { display: flex; flex-direction: column; gap: 6px; }
 .extras:empty { display: none; }

@@ -149,7 +149,7 @@ function stepper() {
 function summaryCard({ date, start, duration, services, price }) {
   return `<div class="card pad pub-summary">
     <div class="sum-when">${icon('calendar')}<div><b>${esc(fmtDateLong(date))}</b><span>às ${start} · ${fmtDuration(duration)}</span></div></div>
-    <ul>${services.map(s => `<li><span>${esc(s.name)}</span><span>${money(s.price)}</span></li>`).join('')}</ul>
+    <ul>${services.map(s => `<li><span>${esc(svcLabel(s))}</span><span>${money(s.price)}</span></li>`).join('')}</ul>
     <div class="sum-total"><span>Total</span><strong>${money(price)}</strong></div>
   </div>`;
 }
@@ -157,7 +157,7 @@ function summaryCard({ date, start, duration, services, price }) {
 function calendarLink({ date, start, duration, services }) {
   const stamp = t => `${date.replace(/-/g, '')}T${fromMin(t).replace(':', '')}00`;
   return 'https://calendar.google.com/calendar/render?action=TEMPLATE' +
-    `&text=${encodeURIComponent(`${services.map(x => x.name).join(' + ')} · ${st.info.settings.businessName}`)}` +
+    `&text=${encodeURIComponent(`${services.map(svcLabel).join(' + ')} · ${st.info.settings.businessName}`)}` +
     `&dates=${stamp(toMin(start))}/${stamp(toMin(start) + duration)}&ctz=America/Sao_Paulo`;
 }
 
@@ -203,7 +203,7 @@ function rushMessage(dayKey) {
   const saved = readStore(REMEMBER_KEY, {});
   const who = st.mode === 'manage' ? st.booking.name : saved.name;
   const what = st.mode === 'manage'
-    ? st.booking.services.map(x => x.name).join(' + ')
+    ? st.booking.services.map(svcLabel).join(' + ')
     : selectedServices().map(x => x.name).join(' + ');
   const when = !dayKey ? 'o quanto antes'
     : dayKey === todayKey() ? 'hoje'
@@ -331,7 +331,7 @@ function mountDetails() {
 function stepDone() {
   const d = st.done;
   const s = st.info.settings;
-  const waMsg = `Olá! Acabei de agendar pelo link: ${d.services.map(x => x.name).join(' + ')}, ${fmtDateLong(d.date)} às ${d.start}. Nome: ${d.name}.`;
+  const waMsg = `Olá! Acabei de agendar pelo link: ${d.services.map(svcLabel).join(' + ')}, ${fmtDateLong(d.date)} às ${d.start}. Nome: ${d.name}.`;
   const canManage = s.changeNoticeHours >= 0 && d.token;
 
   const pending = d.deposit > 0;

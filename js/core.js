@@ -22,6 +22,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const firstName = name => String(name || '').trim().split(/\s+/)[0] || '';
 const initials = name => String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('') || '?';
 const sum = (list, fn) => list.reduce((t, x) => t + (Number(fn(x)) || 0), 0);
+// Nome do serviço no agendamento, com a quantidade quando for mais de uma (ex.: "3× Reaplicação")
+const svcLabel = x => (x.qty > 1 ? `${x.qty}× ${x.name}` : x.name);
 
 const DOW_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const DOW_LONG = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];

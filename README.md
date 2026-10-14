@@ -38,6 +38,7 @@ As clientes marcam horário sozinhas por um link, e a dona gerencia agenda, clie
 | | Aba | O que faz |
 |---|---|---|
 | 📆 | **Agenda** | Visão semanal, horários livres, encaixes, status (inclusive **Faltou**) e remarcação com aviso por WhatsApp |
+| 🔢 | **Quantidade** | O mesmo serviço mais de uma vez no agendamento (ex.: 3× reaplicação), com valor e tempo multiplicados |
 | ➕ | **Adicionais** | Itens não previstos lançados no próprio agendamento (ex.: unha quebrada, reaplicação), com valor e minutos somados ao total |
 | 🔒 | **Bloqueios** | Dia inteiro, vários dias (férias), período do dia ou **toda semana** (ex.: almoço); o motivo fica visível só para a dona |
 | 💅 | **Serviços** | Nome, valor, duração e cor; escolha do que aparece no link público |

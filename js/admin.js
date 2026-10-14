@@ -544,7 +544,7 @@ function apptTags(a) {
 function apptCard(a) {
   const status = STATUS[a.status] ? a.status : 'agendado';
   const color = a.services[0]?.color || 'var(--accent)';
-  const names = a.services.map(s => s.name).join(' + ');
+  const names = a.services.map(svcLabel).join(' + ');
   return `<button class="appt st-${status}" data-action="edit-appt" data-id="${a.id}">
     <div class="appt-time"><strong>${a.start}</strong><span>${fromMin(toMin(a.start) + a.duration)}</span></div>
     <span class="appt-bar" style="background:${esc(color)}"></span>
@@ -854,7 +854,7 @@ function historyRow(a, showYear) {
   const kept = retainedDeposit(a);
   const pay = a.status === 'concluido' && a.payment ? ` · ${PAYMENTS[a.payment]}` : kept ? ' · sinal retido' : '';
   return `<button type="button" data-action="edit-appt" data-id="${a.id}">
-    <div class="h-main"><strong>${date} · ${a.start}</strong><span>${esc(a.services.map(s => s.name).join(' + '))}${pay}</span></div>
+    <div class="h-main"><strong>${date} · ${a.start}</strong><span>${esc(a.services.map(svcLabel).join(' + '))}${pay}</span></div>
     <div class="h-side">${money(kept || a.price)}<span class="badge st-${a.status}">${STATUS[a.status]?.label || ''}</span></div>
   </button>`;
 }
@@ -890,9 +890,13 @@ function openApptForm(appt, preset = {}) {
   const options = db.services.map(s => ({ ...s }));
   booked.forEach(s => {
     if (!options.some(o => o.id === s.serviceId)) {
-      options.push({ id: s.serviceId, name: s.name, price: s.price, duration: s.duration, color: s.color });
+      const q = s.qty || 1;
+      options.push({ id: s.serviceId, name: s.name, price: s.unitPrice ?? s.price / q, duration: s.unitDuration ?? s.duration / q, color: s.color });
     }
   });
+  // Quantidade de cada serviço neste agendamento (ex.: 3 reaplicações)
+  const qtys = Object.fromEntries(booked.map(s => [s.serviceId, s.qty || 1]));
+  const qtyOf = id => qtys[id] || 1;
   const selected = new Set([...booked.map(s => s.serviceId), ...(preset.serviceIds || [])]);
 
   const servicesHtml = options.length
@@ -902,6 +906,11 @@ function openApptForm(appt, preset = {}) {
           <span class="chip-card">
             <b><i style="background:${esc(o.color)}"></i>${esc(o.name)}</b>
             <small>${fmtDuration(o.duration)} · ${money(o.price)}</small>
+            <span class="qty" data-id="${o.id}">
+              <button type="button" data-q="-1" aria-label="Diminuir quantidade">−</button>
+              <b>${qtyOf(o.id)}</b>
+              <button type="button" data-q="1" aria-label="Aumentar quantidade">+</button>
+            </span>
           </span>
         </label>`).join('')}</div>`
     : `<p class="muted small">Nenhum serviço cadastrado. <a href="#servicos" data-action="close-sheet" style="color:var(--accent);font-weight:600">Cadastrar serviços</a></p>`;
@@ -1017,7 +1026,10 @@ function openApptForm(appt, preset = {}) {
       const filledExtras = () => extras.filter(x => String(x.name).trim() || Number(x.price) || Number(x.duration));
       const totals = () => {
         const list = chosen(), ex = filledExtras();
-        return { duration: sum(list, o => o.duration) + sum(ex, x => x.duration), price: sum(list, o => o.price) + sum(ex, x => x.price) };
+        return {
+          duration: sum(list, o => o.duration * qtyOf(o.id)) + sum(ex, x => x.duration),
+          price: sum(list, o => o.price * qtyOf(o.id)) + sum(ex, x => x.price),
+        };
       };
       let priceTouched = isEdit && Math.abs(Number(a.price) - totals().price) > 0.009;
 
@@ -1060,6 +1072,16 @@ function openApptForm(appt, preset = {}) {
         }
         $('#f-manual-wrap').hidden = slotSel.value !== 'manual';
       }
+
+      f.addEventListener('click', e => {
+        const btn = e.target.closest('.qty button');
+        if (!btn) return;
+        e.preventDefault();
+        const box = btn.closest('.qty');
+        qtys[box.dataset.id] = Math.min(20, Math.max(1, qtyOf(box.dataset.id) + Number(btn.dataset.q)));
+        $('b', box).textContent = qtyOf(box.dataset.id);
+        refresh();
+      });
 
       const extrasBox = $('#f-extras');
       function renderExtras() {
@@ -1113,7 +1135,7 @@ function openApptForm(appt, preset = {}) {
 
       const waBtn = $('#f-wa');
       if (waBtn) {
-        const names = a.services.map(s => s.name).join(' + ');
+        const names = a.services.map(svcLabel).join(' + ');
         waBtn.href = waLink(a.phone, `Olá, ${firstName(a.clientName)}! Passando para confirmar seu horário no ${db.settings.businessName}: ${fmtDateLong(a.date)}, às ${a.start} (${names}). Posso confirmar?${manageLine(a)}`);
       }
 
@@ -1165,7 +1187,14 @@ function openApptForm(appt, preset = {}) {
             clientName: client.name,
             phone,
             services: [
-              ...list.map(o => ({ serviceId: o.id, name: o.name, price: Number(o.price), duration: Number(o.duration), color: o.color })),
+              ...list.map(o => {
+                const q = qtyOf(o.id);
+                return {
+                  serviceId: o.id, name: o.name, color: o.color, qty: q,
+                  unitPrice: Number(o.price), unitDuration: Number(o.duration),
+                  price: Number(o.price) * q, duration: Number(o.duration) * q,
+                };
+              }),
               ...extraItems.map(x => ({ serviceId: null, name: String(x.name).trim(), price: Number(x.price) || 0, duration: Number(x.duration) || 0, color: '#8a8580', extra: true })),
             ],
             date,
@@ -1243,7 +1272,7 @@ function returnsBanner() {
 
 function returnMessage(r) {
   const until = r.rule.min === r.rule.max ? `por volta de ${fmtDateLong(r.target)}` : `até ${fmtDateLong(r.closes)}`;
-  return `Olá, ${firstName(r.client.name)}! Já faz ${r.days} dias do seu último atendimento (${r.last.services.map(x => x.name).join(' + ')}). ` +
+  return `Olá, ${firstName(r.client.name)}! Já faz ${r.days} dias do seu último atendimento (${r.last.services.map(svcLabel).join(' + ')}). ` +
     `O retorno indicado (${r.rule.service.name}) é ${until}. Quer garantir seu horário? É só agendar por aqui: ${publicUrl()}`;
 }
 
@@ -1371,7 +1400,7 @@ function reminderBanner() {
 function reminderText(a) {
   const tomorrow = a.date === dateKey(addDays(new Date(), 1));
   const when = tomorrow ? `amanhã (${fmtDateLong(a.date)})` : fmtDateLong(a.date);
-  const names = a.services.map(x => x.name).join(' + ');
+  const names = a.services.map(svcLabel).join(' + ');
   // Sem emojis: alguns aparelhos mostram "?" no lugar deles em mensagens abertas por link
   return `Olá, ${firstName(a.clientName)}! Passando para lembrar do seu horário no ${db.settings.businessName}: ` +
     `${when}, às ${a.start} (${names}).
@@ -1384,7 +1413,7 @@ function openReminders() {
 
   const rowHtml = a => `<div class="rem-row" data-row="${a.id}">
     <div class="h-main"><strong>${a.start} · ${esc(a.clientName)}</strong>
-      <span>${esc(a.services.map(x => x.name).join(' + '))}${a.reminderSentAt ? ' · <b class="sent">Enviado ✓</b>' : ''}</span></div>
+      <span>${esc(a.services.map(svcLabel).join(' + '))}${a.reminderSentAt ? ' · <b class="sent">Enviado ✓</b>' : ''}</span></div>
     <a class="btn btn-sm ${a.reminderSentAt ? 'btn-ghost' : 'btn-primary'}" data-rem="${a.id}"
        href="${waLink(a.phone, reminderText(a))}" target="_blank" rel="noopener">${icon('chat')} ${a.reminderSentAt ? 'Reenviar' : 'Enviar'}</a>
   </div>`;
@@ -1782,7 +1811,7 @@ function serviceBreakdown(appts) {
       // Rateia o valor cobrado (que pode ter desconto) proporcionalmente ao preço de cada serviço
       const share = base ? s.price / base : 1 / a.services.length;
       const r = rows[s.name] || (rows[s.name] = { name: s.name, color: s.color, count: 0, value: 0, extra: Boolean(s.extra) });
-      r.count++;
+      r.count += s.qty || 1;
       r.value += a.price * share;
     });
   });
